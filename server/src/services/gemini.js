@@ -189,7 +189,8 @@ ${chunkText}
  * Generate Question Explanation ("WHY?")
  */
 export const generateQuestionExplanation = async (questionText, options, correctAnswerIndex, userSelectedIndex) => {
-  if (!genAI) {
+  const client = getGenAIClient();
+  if (!client) {
     return {
       correctAnswer: options[correctAnswerIndex] || 'Correct Option',
       whyCorrect: `Option (${String.fromCharCode(65 + correctAnswerIndex)}) is correct according to standard competitive exam references.`,
@@ -235,7 +236,8 @@ Return ONLY valid JSON.
  * Generate Similar Practice Questions
  */
 export const generateSimilarQuestions = async (questionText, subject, topic, count = 3) => {
-  if (!genAI) {
+  const client = getGenAIClient();
+  if (!client) {
     return generateFallbackSimilarQuestions(questionText, subject, topic, count);
   }
 
@@ -270,8 +272,9 @@ Return ONLY JSON.
  * AI Study Assistant Chat
  */
 export const askAIStudyAssistant = async (userPrompt, contextText = '') => {
-  if (!genAI) {
-    return `[AI Assistant] You asked: "${userPrompt}". Note: To enable live Gemini responses, set GEMINI_API_KEY in server/.env. Based on study context: Always focus on key articles, amendments, historical dates, and standard formulas for high scores!`;
+  const client = getGenAIClient();
+  if (!client) {
+    return `[AI Assistant] You asked: "${userPrompt}". Note: To enable live Gemini responses, configure GEMINI_API_KEY environment variable. Based on study context: Always focus on key articles, amendments, historical dates, and standard formulas for high scores!`;
   }
 
   try {
