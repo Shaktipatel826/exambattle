@@ -4,6 +4,8 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 import { connectDB } from './config/db.js';
 import { seedInitialData } from './seed/demoData.js';
@@ -22,7 +24,8 @@ import adminRoutes from './routes/adminRoutes.js';
 import studentRoutes from './routes/studentRoutes.js';
 import taxonomyRoutes from './routes/taxonomyRoutes.js';
 
-import fs from 'fs';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config({ path: fs.existsSync('./server/.env') ? './server/.env' : './.env' });
 
@@ -73,13 +76,26 @@ initializeBattleSocket(io);
 
 // Production Static Frontend Serving
 if (process.env.NODE_ENV === 'production') {
-  const clientDistPath = path.join(process.cwd(), 'client', 'dist');
+  const possiblePaths = [
+    path.resolve(__dirname, '../../client/dist'),
+    path.resolve(process.cwd(), 'client', 'dist'),
+    path.resolve(process.cwd(), '../client/dist')
+  ];
+  const clientDistPath = possiblePaths.find(p => fs.existsSync(p)) || possiblePaths[0];
+
+  console.log(`[Production Serving] Serving static frontend from: ${clientDistPath}`);
+
   app.use(express.static(clientDistPath));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
       return next();
     }
-    res.sendFile(path.join(clientDistPath, 'index.html'));
+    const indexPath = path.join(clientDistPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send('Frontend static assets build missing');
+    }
   });
 }
 
