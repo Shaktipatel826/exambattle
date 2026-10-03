@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigation } from './components/Navigation';
 import { AuthPage } from './pages/AuthPage';
@@ -19,6 +19,34 @@ const AppContent = () => {
   const { user, token, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('HOME');
   const [assistantOpen, setAssistantOpen] = useState(false);
+
+  // Hardware Back Button listener for Android Capacitor APK
+  useEffect(() => {
+    let handler;
+    const registerBackButton = async () => {
+      try {
+        const { App: CapApp } = await import('@capacitor/app');
+        handler = await CapApp.addListener('backButton', ({ canGoBack }) => {
+          if (assistantOpen) {
+            setAssistantOpen(false);
+          } else if (activeTab !== 'HOME') {
+            setActiveTab('HOME');
+          } else {
+            CapApp.minimizeApp();
+          }
+        });
+      } catch (e) {
+        // Web environment gracefully ignores Capacitor native back handler
+      }
+    };
+    registerBackButton();
+
+    return () => {
+      if (handler && typeof handler.remove === 'function') {
+        handler.remove();
+      }
+    };
+  }, [activeTab, assistantOpen]);
 
   if (loading) {
     return (

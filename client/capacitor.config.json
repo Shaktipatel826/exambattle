@@ -1,0 +1,17 @@
+{
+  "appId": "com.shakti.exambattle",
+  "appName": "ExamBattle",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
+      "backgroundColor": "#0f172a"
+    }
+  }
+}

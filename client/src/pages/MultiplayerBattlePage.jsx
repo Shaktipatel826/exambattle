@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { Swords, Users, Clock, Trophy, Play, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { getSocketUrl } from '../lib/apiConfig';
 
 export const MultiplayerBattlePage = ({ token, user }) => {
   const [socket, setSocket] = useState(null);
@@ -22,8 +23,8 @@ export const MultiplayerBattlePage = ({ token, user }) => {
   const [timeLeft, setTimeLeft] = useState(0);
 
   useEffect(() => {
-    // Initialize Socket.io connection to backend server (Dynamic domain for production)
-    const socketUrl = window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin;
+    // Initialize Socket.io connection to backend server (Dynamic domain for web/Capacitor)
+    const socketUrl = getSocketUrl();
     const newSocket = io(socketUrl);
     setSocket(newSocket);
 

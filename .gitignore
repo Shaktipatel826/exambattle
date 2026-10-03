@@ -17,3 +17,8 @@ uploads
 .DS_Store
 .vscode
 .idea
+
+# Local JDK and Android SDK downloads
+client/android-sdk/
+client/jdk17-portable/
+*.zip
