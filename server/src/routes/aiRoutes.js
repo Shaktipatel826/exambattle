@@ -194,7 +194,7 @@ router.post('/admin-generate-job', authMiddleware, adminGuard, upload.single('fi
       sourceDocumentName,
       createdBy: req.user.name || 'Admin',
       provider: 'Gemini',
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3.8-flash',
       status: 'QUEUED',
       generationType,
       subject,

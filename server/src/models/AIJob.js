@@ -5,7 +5,7 @@ const aiJobSchema = new mongoose.Schema({
   sourceDocumentName: { type: String, default: 'Uploaded Material' },
   createdBy: { type: String, required: true },
   provider: { type: String, default: 'Gemini' },
-  model: { type: String, default: 'gemini-1.5-flash' },
+  model: { type: String, default: 'gemini-3.8-flash' },
   status: { type: String, enum: ['QUEUED', 'PROCESSING', 'COMPLETED', 'PARTIAL', 'FAILED'], default: 'QUEUED', index: true },
   generationType: { type: String, enum: ['ONE_LINERS', 'STUDY_NOTES', 'MCQS', 'PRACTICE_TEST', 'ALL'], default: 'ALL' },
   subject: { type: String, default: 'General Studies' },

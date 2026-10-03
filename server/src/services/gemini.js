@@ -1,11 +1,17 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import crypto from 'crypto';
 
-const apiKey = process.env.GEMINI_API_KEY;
 let genAI = null;
 
-if (apiKey && apiKey.trim().length > 0 && apiKey !== 'your_gemini_api_key_here') {
-  genAI = new GoogleGenerativeAI(apiKey);
+function getGenAIClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.trim().length === 0 || apiKey === 'your_gemini_api_key_here') {
+    return null;
+  }
+  if (!genAI) {
+    genAI = new GoogleGenerativeAI(apiKey);
+  }
+  return genAI;
 }
 
 // In-Memory Cache for AI Study Pack deduplication
@@ -22,28 +28,42 @@ export const getContentHash = (text) => {
  * Execute Gemini model call with timeout & retry strategy
  */
 async function callGeminiWithRetry(prompt, timeoutMs = 25000, maxRetries = 2) {
-  if (!genAI) throw new Error('GEMINI_API_KEY not configured.');
+  const client = getGenAIClient();
+  if (!client) throw new Error('GEMINI_API_KEY not configured.');
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const preferredModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+  const candidateModels = Array.from(new Set([preferredModel, 'gemini-3.8-flash', 'gemini-3.5-flash']));
 
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-    try {
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('AI Request Timeout after 25s')), timeoutMs)
-      );
+  let lastError = null;
 
-      const apiPromise = model.generateContent(prompt);
-      const result = await Promise.race([apiPromise, timeoutPromise]);
-      return result.response.text();
-    } catch (err) {
-      if (attempt <= maxRetries) {
-        console.warn(`[AI Service Warning] Attempt ${attempt} failed: ${err.message}. Retrying...`);
-        await new Promise(res => setTimeout(res, attempt * 1000));
-      } else {
-        throw err;
+  for (const modelName of candidateModels) {
+    const model = client.getGenerativeModel({ model: modelName });
+
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('AI Request Timeout after 25s')), timeoutMs)
+        );
+
+        const apiPromise = model.generateContent(prompt);
+        const result = await Promise.race([apiPromise, timeoutPromise]);
+        return result.response.text();
+      } catch (err) {
+        lastError = err;
+        const isNotFound = err.message.includes('404') || err.message.includes('not found') || err.message.includes('is no longer available');
+        if (isNotFound) {
+          console.warn(`[AI Service Warning] Model ${modelName} returned unavailable/404. Trying fallback model...`);
+          break;
+        }
+        if (attempt <= maxRetries) {
+          console.warn(`[AI Service Warning] Model ${modelName} attempt ${attempt} failed: ${err.message}. Retrying...`);
+          await new Promise(res => setTimeout(res, attempt * 1000));
+        }
       }
     }
   }
+
+  throw lastError || new Error('All Gemini model fallbacks failed.');
 }
 
 /**
@@ -79,7 +99,8 @@ export const generateStudyPackWithAI = async (text, subject = 'General Studies',
     return aiCache.get(contentHash);
   }
 
-  if (!genAI) {
+  const client = getGenAIClient();
+  if (!client) {
     console.warn('[AI Service Warning] GEMINI_API_KEY missing. Using fallback rule generator.');
     return generateFallbackStudyPack(text, subject, topic);
   }
