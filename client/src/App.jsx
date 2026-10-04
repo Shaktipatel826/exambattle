@@ -18,6 +18,7 @@ import { Bot } from 'lucide-react';
 const AppContent = () => {
   const { user, token, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('HOME');
+  const [profileOpen, setProfileOpen] = useState(false);
   const [customTestConfig, setCustomTestConfig] = useState(null);
 
   const handleLaunchAdminTest = (testConfig) => {
