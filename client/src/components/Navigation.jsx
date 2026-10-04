@@ -4,8 +4,11 @@ import {
   Users, User, Shield, UploadCloud, Cpu, AlertTriangle, LogOut, X, Mail, Award, Target
 } from 'lucide-react';
 
-export const Navigation = ({ activeTab, setActiveTab, user, onLogout }) => {
-  const [profileOpen, setProfileOpen] = useState(false);
+export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpen: externalProfileOpen, setProfileOpen: externalSetProfileOpen }) => {
+  const [internalProfileOpen, setInternalProfileOpen] = useState(false);
+  const profileOpen = externalProfileOpen !== undefined ? externalProfileOpen : internalProfileOpen;
+  const setProfileOpen = externalSetProfileOpen || setInternalProfileOpen;
+
   const isAdmin = user && user.role === 'ADMIN';
 
   const studentNavItems = [
@@ -13,6 +16,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout }) => {
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
     { id: 'AI_STUDY', label: 'AI Study Lab', icon: Sparkles },
+    { id: 'PROFILE', label: 'Profile / Logout', icon: User, isProfile: true },
     { id: 'REVISION', label: 'Revision', icon: RefreshCw },
     { id: 'GAMIFICATION', label: 'Progress', icon: Trophy },
     { id: 'SOCIAL', label: 'Friends', icon: Users },
@@ -32,6 +36,14 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout }) => {
   const handleLogoutClick = () => {
     setProfileOpen(false);
     onLogout();
+  };
+
+  const handleItemClick = (item) => {
+    if (item.isProfile) {
+      setProfileOpen(true);
+    } else {
+      setActiveTab(item.id);
+    }
   };
 
   return (
@@ -61,12 +73,14 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout }) => {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setActiveTab(item.id)}
+                    onClick={() => handleItemClick(item)}
                     className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                       isActive
                         ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
                         : item.highlight
                         ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30'
+                        : item.isProfile
+                        ? 'bg-purple-950/60 text-purple-300 border border-purple-800/80 hover:bg-purple-900/80 font-bold'
                         : 'text-slate-300 hover:text-white hover:bg-slate-800'
                     }`}
                   >
@@ -77,28 +91,21 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout }) => {
               })}
             </div>
 
-            {/* Touch-Friendly Top-Right Profile / Account Launcher */}
+            {/* Touch-Friendly High-Visibility Top-Right Profile / Account Launcher */}
             <div className="flex items-center space-x-2">
               {user && (
                 <button
                   onClick={() => setProfileOpen(true)}
-                  aria-label="Account Profile"
-                  className="flex items-center space-x-2 bg-slate-900 border border-slate-700/60 hover:border-blue-500/50 rounded-full px-2.5 py-1 sm:px-3 sm:py-1 text-xs transition-all active:scale-95 shadow-sm"
+                  aria-label="Account Profile & Logout"
+                  className="flex items-center space-x-1.5 bg-gradient-to-r from-purple-950/90 via-indigo-950/90 to-slate-900 border border-purple-500/50 hover:border-purple-400 rounded-full px-3 py-1.5 text-xs transition-all active:scale-95 shadow-md shadow-purple-950/50"
                 >
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-[11px] shadow-sm">
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-white font-black text-[11px] shadow-sm">
                     {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                   </div>
-                  <span className="font-semibold text-slate-200 max-w-[90px] sm:max-w-[120px] truncate hidden sm:inline">
-                    {user.name}
+                  <span className="font-extrabold text-purple-200 text-[11px]">
+                    Profile & Logout
                   </span>
-                  <span className="bg-blue-900/80 text-blue-300 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                    Lvl {user.level || 1}
-                  </span>
-                  {user.role === 'ADMIN' && (
-                    <span className="bg-purple-900/80 text-purple-300 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                      ADMIN
-                    </span>
-                  )}
+                  <LogOut className="w-3.5 h-3.5 text-red-400 ml-0.5 shrink-0" />
                 </button>
               )}
 
@@ -115,20 +122,24 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout }) => {
           </div>
         </div>
 
-        {/* Mobile Bottom Navigation Bar */}
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-950/95 border-t border-slate-800 backdrop-blur-lg px-2 py-2 z-50 flex justify-around">
+        {/* Mobile Bottom Navigation Bar - includes explicit Profile / Logout tab */}
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-950/95 border-t border-slate-800 backdrop-blur-lg px-1 py-1.5 z-50 flex justify-around items-center">
           {studentNavItems.slice(0, 5).map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center py-1 px-2 rounded-lg text-[10px] font-medium transition-all ${
-                  isActive ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+                onClick={() => handleItemClick(item)}
+                className={`flex flex-col items-center py-1 px-1.5 rounded-xl text-[10px] font-medium transition-all ${
+                  item.isProfile
+                    ? 'text-purple-300 font-bold bg-purple-950/60 border border-purple-800/80 px-2'
+                    : isActive
+                    ? 'text-blue-400 font-bold bg-blue-950/40'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Icon className="w-5 h-5 mb-0.5" />
+                <Icon className={`w-5 h-5 mb-0.5 ${item.isProfile ? 'text-red-400' : ''}`} />
                 <span>{item.label}</span>
               </button>
             );

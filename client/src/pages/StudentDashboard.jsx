@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Swords, Sparkles, RefreshCw, BookOpen, Flame, Zap, Trophy, 
-  Target, AlertTriangle, CheckCircle2, ArrowRight, Award, Coins, Calendar, Shield, Users
+  Target, AlertTriangle, CheckCircle2, ArrowRight, Award, Coins, Calendar, Shield, Users, User, LogOut, Mail
 } from 'lucide-react';
 
-export const StudentDashboard = ({ onNavigate, token, user }) => {
+export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLogout }) => {
   const [activeTab, setActiveTab] = useState('DASHBOARD'); // DASHBOARD | LEADERBOARD | ACHIEVEMENTS
   const [dashboardData, setDashboardData] = useState(null);
   const [leaderboardData, setLeaderboardData] = useState([]);
@@ -74,26 +74,35 @@ export const StudentDashboard = ({ onNavigate, token, user }) => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 text-xs">
       
-      {/* Top Navigation Tabs */}
-      <div className="flex gap-2 border-b border-slate-800 pb-3">
+      {/* Top Navigation Sub-Tabs */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
         {[
           { id: 'DASHBOARD', label: 'Student Home', icon: BookOpen },
           { id: 'LEADERBOARD', label: 'Leaderboard', icon: Trophy },
-          { id: 'ACHIEVEMENTS', label: 'Badges & Rewards', icon: Award }
+          { id: 'ACHIEVEMENTS', label: 'Badges & Rewards', icon: Award },
+          { id: 'PROFILE', label: 'My Profile & Logout', icon: User, isProfile: true }
         ].map(tab => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                if (tab.isProfile && onOpenProfile) {
+                  onOpenProfile();
+                } else {
+                  setActiveTab(tab.id);
+                }
+              }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
-                active
+                tab.isProfile
+                  ? 'bg-purple-950/80 border-purple-600/80 text-purple-200 hover:bg-purple-900 active:scale-95 shadow-sm'
+                  : active
                   ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className={`w-4 h-4 ${tab.isProfile ? 'text-red-400' : ''}`} />
               <span>{tab.label}</span>
             </button>
           );
@@ -103,11 +112,11 @@ export const StudentDashboard = ({ onNavigate, token, user }) => {
       {activeTab === 'DASHBOARD' && (
         <div className="space-y-6">
           
-          {/* Top Banner: Greeting, XP, Level & Streak */}
+          {/* Top Banner: Greeting, XP, Level, Streak & Profile/Logout Launcher */}
           <div className="glass-panel rounded-3xl p-6 relative overflow-hidden bg-gradient-to-r from-slate-900 via-purple-950/30 to-slate-900 border border-purple-500/30">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
               
-              <div className="space-y-2">
+              <div className="space-y-2 flex-1">
                 <div className="flex items-center space-x-2 text-xs font-semibold text-purple-300 uppercase tracking-wider">
                   <span>Target Exams Aspirant</span>
                   <span>•</span>
@@ -117,9 +126,23 @@ export const StudentDashboard = ({ onNavigate, token, user }) => {
                   </span>
                 </div>
 
-                <h1 className="text-2xl sm:text-3xl font-black text-white">
-                  Welcome back, <span className="bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent">{user?.name || 'Aspirant'} 👋</span>
-                </h1>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h1 className="text-2xl sm:text-3xl font-black text-white">
+                    Welcome back, <span className="bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent">{user?.name || 'Aspirant'} 👋</span>
+                  </h1>
+
+                  {/* Prominent Banner Profile & Logout Button */}
+                  {onOpenProfile && (
+                    <button
+                      onClick={onOpenProfile}
+                      className="px-4 py-2 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 hover:from-purple-800 hover:to-indigo-800 text-purple-200 border border-purple-500/50 rounded-xl font-extrabold flex items-center gap-2 text-xs shadow-md shadow-purple-950/50 active:scale-95 transition-all"
+                    >
+                      <User className="w-4 h-4 text-purple-300" />
+                      <span>My Profile & Logout</span>
+                      <LogOut className="w-3.5 h-3.5 text-red-400" />
+                    </button>
+                  )}
+                </div>
                 
                 {/* Level & XP Progress Bar */}
                 <div className="space-y-1 max-w-md pt-1">

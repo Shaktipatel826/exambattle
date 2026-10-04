@@ -18,6 +18,7 @@ import { Bot } from 'lucide-react';
 const AppContent = () => {
   const { user, token, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('HOME');
+  const [profileOpen, setProfileOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
 
   // Hardware Back Button listener for Android Capacitor APK
@@ -27,7 +28,9 @@ const AppContent = () => {
       try {
         const { App: CapApp } = await import('@capacitor/app');
         handler = await CapApp.addListener('backButton', ({ canGoBack }) => {
-          if (assistantOpen) {
+          if (profileOpen) {
+            setProfileOpen(false);
+          } else if (assistantOpen) {
             setAssistantOpen(false);
           } else if (activeTab !== 'HOME') {
             setActiveTab('HOME');
@@ -46,7 +49,7 @@ const AppContent = () => {
         handler.remove();
       }
     };
-  }, [activeTab, assistantOpen]);
+  }, [activeTab, assistantOpen, profileOpen]);
 
   if (loading) {
     return (
@@ -69,6 +72,8 @@ const AppContent = () => {
         setActiveTab={setActiveTab}
         user={user}
         onLogout={logout}
+        profileOpen={profileOpen}
+        setProfileOpen={setProfileOpen}
       />
 
       {/* Main View Router */}
@@ -78,6 +83,8 @@ const AppContent = () => {
             token={token}
             user={user}
             onNavigate={(tab) => setActiveTab(tab)}
+            onOpenProfile={() => setProfileOpen(true)}
+            onLogout={logout}
           />
         )}
 
