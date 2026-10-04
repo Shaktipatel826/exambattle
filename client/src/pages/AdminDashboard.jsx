@@ -460,7 +460,7 @@ export const AdminDashboard = ({ token }) => {
                       )}
                     </div>
 
-                    <p className="font-bold text-slate-100 text-sm">{q.question}</p>
+                    <p className="font-extrabold text-[#252525] text-sm opacity-100">{q.question}</p>
 
                     <div className="grid grid-cols-2 gap-2 text-slate-300">
                       {q.options.map((opt, idx) => (
@@ -552,7 +552,7 @@ export const AdminDashboard = ({ token }) => {
                   <div className="space-y-1">
                     <span className="bg-amber-950 text-amber-300 text-[10px] px-2 py-0.5 rounded font-bold border border-amber-800">{q.sourceType}</span>
                     <span className="ml-2 text-slate-400 text-[10px]">{q.subject} • {q.topic}</span>
-                    <p className="font-bold text-slate-100 text-sm mt-1">{q.question}</p>
+                    <p className="font-extrabold text-[#252525] text-sm mt-1 opacity-100">{q.question}</p>
                   </div>
                   <div className="flex space-x-2">
                     <button

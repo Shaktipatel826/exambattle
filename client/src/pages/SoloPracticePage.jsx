@@ -338,26 +338,26 @@ export const SoloPracticePage = ({ token, onComplete }) => {
     const isMarked = markedForReview[currentIndex];
 
     return (
-      <div className="max-w-7xl mx-auto px-4 py-4 space-y-4 text-xs">
+      <div className="max-w-7xl mx-auto px-4 py-4 space-y-4 text-xs text-[#252525]">
         
         {/* Top Header Bar */}
-        <div className="glass-panel p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+        <div className="bg-[#FFFDF8] p-4 rounded-xl border border-[#E2DACB] flex justify-between items-center shadow-sm">
           <div>
-            <span className="font-bold text-slate-100 text-sm">{config.subject} • {config.exam}</span>
-            <p className="text-[11px] text-slate-400">Mode: {config.mode} | Negative Marking: -{config.negativeMarking}</p>
+            <span className="font-extrabold text-[#252525] text-sm">{config.subject} • {config.exam}</span>
+            <p className="text-[11px] text-[#66635D] font-medium">Mode: {config.mode} | Negative Marking: -{config.negativeMarking}</p>
           </div>
 
           <div className="flex items-center gap-4">
             <div className={`px-4 py-2 rounded-xl border flex items-center gap-2 font-mono font-bold text-sm ${
-              timeLeftSeconds < 120 ? 'bg-red-950/80 text-red-300 border-red-500/60 animate-pulse' : 'bg-slate-900 text-purple-300 border-slate-700'
+              timeLeftSeconds < 120 ? 'bg-[#FDF2F2] text-[#9E2A2B] border-[#F87171] animate-pulse' : 'bg-[#F7F3EA] text-[#244A73] border-[#E2DACB]'
             }`}>
-              <Clock className="w-4 h-4 text-purple-400" />
+              <Clock className="w-4 h-4 text-[#244A73]" />
               <span>{formatTime(timeLeftSeconds)}</span>
             </div>
 
             <button
               onClick={() => setShowSubmitConfirm(true)}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider text-xs"
+              className="px-4 py-2 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-extrabold uppercase tracking-wider text-xs shadow-sm"
             >
               SUBMIT PAPER
             </button>
@@ -370,25 +370,25 @@ export const SoloPracticePage = ({ token, onComplete }) => {
           {/* Left 3 Cols: Question & Options */}
           <div className="lg:col-span-3 space-y-4">
             {currentQ && (
-              <div className="glass-panel p-6 rounded-2xl border border-slate-700/80 space-y-5">
+              <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm space-y-5">
                 
                 {/* Question Metadata */}
-                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                  <span className="font-bold text-slate-300">
+                <div className="flex justify-between items-center border-b border-[#E2DACB] pb-3">
+                  <span className="font-bold text-[#66635D]">
                     Question {currentIndex + 1} of {questions.length}
                   </span>
                   <div className="flex gap-2">
-                    <span className="bg-slate-800 text-slate-300 px-2.5 py-1 rounded text-[10px] font-bold">
+                    <span className="bg-[#EFE9DC] text-[#252525] px-2.5 py-1 rounded text-[10px] font-bold border border-[#D5CDBF]">
                       {currentQ.difficulty || 'Medium'}
                     </span>
-                    <span className="bg-purple-950 text-purple-300 border border-purple-800 px-2.5 py-1 rounded text-[10px] font-bold">
+                    <span className="bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF] px-2.5 py-1 rounded text-[10px] font-bold">
                       {currentQ.topic || 'General'}
                     </span>
                   </div>
                 </div>
 
-                {/* Question Statement */}
-                <p className="text-sm sm:text-base font-bold text-slate-100 leading-relaxed">
+                {/* Explicitly Readable Dark Charcoal Question Text */}
+                <p className="text-sm sm:text-base font-extrabold text-[#252525] leading-relaxed opacity-100">
                   {currentQ.question}
                 </p>
 
@@ -402,26 +402,26 @@ export const SoloPracticePage = ({ token, onComplete }) => {
                         onClick={() => handleSelectOption(oIdx)}
                         className={`w-full text-left p-3.5 rounded-xl border text-xs sm:text-sm transition-all flex items-center justify-between ${
                           isSelected
-                            ? 'bg-purple-600/30 border-purple-500 text-purple-200 font-bold shadow-md shadow-purple-600/20'
-                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                            ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73] font-black shadow-sm'
+                            : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525] hover:border-[#244A73]'
                         }`}
                       >
-                        <span><strong className="mr-2">{String.fromCharCode(65 + oIdx)}.</strong> {opt}</span>
-                        {isSelected && <CheckCircle2 className="w-5 h-5 text-purple-400 shrink-0" />}
+                        <span className="text-[#252525] font-semibold"><strong className="mr-2 text-[#244A73]">{String.fromCharCode(65 + oIdx)}.</strong> {opt}</span>
+                        {isSelected && <CheckCircle2 className="w-5 h-5 text-[#244A73] shrink-0" />}
                       </button>
                     );
                   })}
                 </div>
 
                 {/* Question Bottom Action Bar */}
-                <div className="border-t border-slate-800 pt-4 flex flex-wrap justify-between items-center gap-2">
+                <div className="border-t border-[#E2DACB] pt-4 flex flex-wrap justify-between items-center gap-2">
                   <div className="flex gap-2">
                     <button
                       onClick={handleToggleMarkForReview}
                       className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border ${
                         isMarked
-                          ? 'bg-amber-600 text-white border-amber-500'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                          ? 'bg-[#D97706] text-white border-[#B45309]'
+                          : 'bg-[#F7F3EA] border-[#E2DACB] text-[#66635D] hover:text-[#252525]'
                       }`}
                     >
                       <Bookmark className="w-3.5 h-3.5" />
@@ -431,7 +431,7 @@ export const SoloPracticePage = ({ token, onComplete }) => {
                     {isAnswered && (
                       <button
                         onClick={handleClearAnswer}
-                        className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-red-400 text-xs font-bold flex items-center gap-1"
+                        className="px-3 py-2 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#9E2A2B] hover:bg-[#FDF2F2] text-xs font-bold flex items-center gap-1"
                       >
                         <RotateCcw className="w-3.5 h-3.5" /> Clear Answer
                       </button>
@@ -442,7 +442,7 @@ export const SoloPracticePage = ({ token, onComplete }) => {
                     <button
                       disabled={currentIndex === 0}
                       onClick={() => setCurrentIndex(currentIndex - 1)}
-                      className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 font-bold disabled:opacity-50 flex items-center gap-1"
+                      className="px-4 py-2 rounded-xl bg-[#FFFDF8] border border-[#E2DACB] text-[#252525] font-bold disabled:opacity-40 flex items-center gap-1"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" /> Previous
                     </button>
@@ -450,7 +450,7 @@ export const SoloPracticePage = ({ token, onComplete }) => {
                     <button
                       disabled={currentIndex === questions.length - 1}
                       onClick={() => setCurrentIndex(currentIndex + 1)}
-                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold disabled:opacity-50 flex items-center gap-1"
+                      className="px-4 py-2 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-extrabold disabled:opacity-40 flex items-center gap-1"
                     >
                       Next <ArrowRight className="w-3.5 h-3.5" />
                     </button>
@@ -462,20 +462,20 @@ export const SoloPracticePage = ({ token, onComplete }) => {
           </div>
 
           {/* Right 1 Col: Question Palette Navigation */}
-          <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-4">
-            <h3 className="font-bold text-white text-xs flex items-center gap-1.5">
-              <CheckSquare className="w-4 h-4 text-purple-400" /> QUESTION PALETTE
+          <div className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] shadow-sm space-y-4">
+            <h3 className="font-bold text-[#252525] text-xs flex items-center gap-1.5">
+              <CheckSquare className="w-4 h-4 text-[#244A73]" /> QUESTION PALETTE
             </h3>
 
             {/* Summary Counters */}
             <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
-              <div className="p-2 rounded bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-center">
+              <div className="p-2 rounded-xl bg-[#EFE9DC] border border-[#2D6A4F]/30 text-[#2D6A4F] text-center">
                 Attempted: {attemptedCount}
               </div>
-              <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-400 text-center">
+              <div className="p-2 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#66635D] text-center">
                 Unattempted: {unattemptedCount}
               </div>
-              <div className="p-2 rounded bg-amber-950/60 border border-amber-800 text-amber-300 text-center col-span-2">
+              <div className="p-2 rounded-xl bg-[#FEF3C7] border border-[#F59E0B]/30 text-[#B45309] text-center col-span-2">
                 Marked for Review: {markedCount}
               </div>
             </div>
@@ -487,17 +487,17 @@ export const SoloPracticePage = ({ token, onComplete }) => {
                 const rev = markedForReview[idx];
                 const active = idx === currentIndex;
 
-                let paletteStyle = 'bg-slate-900 text-slate-400 border-slate-800';
-                if (ans && rev) paletteStyle = 'bg-amber-600 text-white border-amber-400 font-black';
-                else if (ans) paletteStyle = 'bg-emerald-600 text-white border-emerald-400 font-black';
-                else if (rev) paletteStyle = 'bg-purple-600 text-white border-purple-400 font-black';
+                let paletteStyle = 'bg-[#F7F3EA] text-[#66635D] border-[#E2DACB]';
+                if (ans && rev) paletteStyle = 'bg-[#B45309] text-white border-[#92400E] font-black';
+                else if (ans) paletteStyle = 'bg-[#2D6A4F] text-white border-[#1B4332] font-black';
+                else if (rev) paletteStyle = 'bg-[#244A73] text-white border-[#1B3857] font-black';
 
                 return (
                   <button
                     key={idx}
                     onClick={() => setCurrentIndex(idx)}
                     className={`h-9 rounded-lg text-xs font-bold border transition-all flex items-center justify-center ${paletteStyle} ${
-                      active ? 'ring-2 ring-purple-400 ring-offset-2 ring-offset-slate-950' : ''
+                      active ? 'ring-2 ring-[#244A73] ring-offset-2 ring-offset-[#F7F3EA]' : ''
                     }`}
                   >
                     {idx + 1}
@@ -511,31 +511,31 @@ export const SoloPracticePage = ({ token, onComplete }) => {
 
         {/* SUBMIT CONFIRMATION MODAL */}
         {showSubmitConfirm && (
-          <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-            <div className="glass-panel p-6 rounded-2xl border border-purple-500/40 max-w-md w-full space-y-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-amber-400" /> Confirm Test Paper Submission
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-xl max-w-md w-full space-y-4">
+              <h3 className="text-base font-bold text-[#252525] flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-[#B45309]" /> Confirm Test Paper Submission
               </h3>
               
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
-                <p className="text-slate-300">Are you sure you want to finalize and submit your test paper?</p>
+              <div className="p-4 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] space-y-2 text-xs">
+                <p className="text-[#252525]">Are you sure you want to finalize and submit your test paper?</p>
                 <div className="grid grid-cols-3 gap-2 text-center pt-2 font-bold">
-                  <div className="text-emerald-400">Attempted: {attemptedCount}</div>
-                  <div className="text-slate-400">Unattempted: {unattemptedCount}</div>
-                  <div className="text-amber-400">Review: {markedCount}</div>
+                  <div className="text-[#2D6A4F]">Attempted: {attemptedCount}</div>
+                  <div className="text-[#66635D]">Unattempted: {unattemptedCount}</div>
+                  <div className="text-[#B45309]">Review: {markedCount}</div>
                 </div>
               </div>
 
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowSubmitConfirm(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold"
+                  className="flex-1 py-2.5 rounded-xl bg-[#EFE9DC] hover:bg-[#E2DACB] text-[#252525] font-bold"
                 >
                   Continue Test
                 </button>
                 <button
                   onClick={handleSubmitTest}
-                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                  className="flex-1 py-2.5 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-bold"
                 >
                   Submit Final Answers
                 </button>
@@ -554,39 +554,39 @@ export const SoloPracticePage = ({ token, onComplete }) => {
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6 text-xs">
         
         {/* Score Card */}
-        <div className="glass-panel p-8 rounded-3xl border border-slate-700 text-center space-y-6">
-          <div className="w-16 h-16 mx-auto rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-            <Award className="w-8 h-8" />
+        <div className="bg-[#FFFDF8] p-8 rounded-3xl border border-[#E2DACB] shadow-sm text-center space-y-6">
+          <div className="w-16 h-16 mx-auto rounded-full bg-[#EFE9DC] text-[#2D6A4F] flex items-center justify-center border border-[#E2DACB]">
+            <Award className="w-8 h-8 text-[#2D6A4F]" />
           </div>
           <div>
-            <h2 className="text-2xl font-black text-white">TEST COMPLETED & VERIFIED</h2>
-            <p className="text-slate-400 text-xs">Server-calculated score and breakdown record.</p>
+            <h2 className="text-2xl font-black text-[#252525]">TEST COMPLETED & VERIFIED</h2>
+            <p className="text-[#66635D] text-xs">Server-calculated score and breakdown record.</p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-[#F7F3EA] p-4 rounded-2xl border border-[#E2DACB] text-center">
             <div>
-              <span className="text-[10px] text-slate-400 font-bold block">FINAL SCORE</span>
-              <span className="text-2xl font-black text-blue-400">{result.score} / {result.totalQuestions}</span>
+              <span className="text-[10px] text-[#66635D] font-bold block">FINAL SCORE</span>
+              <span className="text-2xl font-black text-[#244A73]">{result.score} / {result.totalQuestions}</span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-400 font-bold block">ACCURACY</span>
-              <span className="text-2xl font-black text-emerald-400">{result.accuracy}%</span>
+              <span className="text-[10px] text-[#66635D] font-bold block">ACCURACY</span>
+              <span className="text-2xl font-black text-[#2D6A4F]">{result.accuracy}%</span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-400 font-bold block">CORRECT / WRONG</span>
-              <span className="text-xl font-black text-slate-200">
-                <span className="text-emerald-400">{result.correctCount}</span> / <span className="text-red-400">{result.wrongCount}</span>
+              <span className="text-[10px] text-[#66635D] font-bold block">CORRECT / WRONG</span>
+              <span className="text-xl font-black text-[#252525]">
+                <span className="text-[#2D6A4F]">{result.correctCount}</span> / <span className="text-[#9E2A2B]">{result.wrongCount}</span>
               </span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-400 font-bold block">XP REWARD</span>
-              <span className="text-2xl font-black text-amber-400">+{result.xpEarned} XP</span>
+              <span className="text-[10px] text-[#66635D] font-bold block">XP REWARD</span>
+              <span className="text-2xl font-black text-[#B45309]">+{result.xpEarned} XP</span>
             </div>
           </div>
 
           <button
             onClick={() => setMode('CONFIG')}
-            className="px-8 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 uppercase tracking-wider"
+            className="px-8 py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-bold text-xs shadow-sm uppercase tracking-wider"
           >
             START ANOTHER PRACTICE TEST
           </button>
@@ -595,48 +595,48 @@ export const SoloPracticePage = ({ token, onComplete }) => {
         {/* Question-Wise Detailed Review Section */}
         {result.questionReviews && result.questionReviews.length > 0 && (
           <div className="space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <FileText className="w-4 h-4 text-purple-400" /> Question-Wise Detailed Review
+            <h3 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[#244A73]" /> Question-Wise Detailed Review
             </h3>
 
             {result.questionReviews.map((rev, idx) => (
-              <div key={idx} className="glass-panel p-5 rounded-xl border border-slate-800 space-y-3">
+              <div key={idx} className="bg-[#FFFDF8] p-5 rounded-2xl border border-[#E2DACB] shadow-sm space-y-3">
                 <div className="flex justify-between items-start">
-                  <span className="font-bold text-slate-300 text-xs">Question {idx + 1}</span>
+                  <span className="font-bold text-[#66635D] text-xs">Question {idx + 1}</span>
                   <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                    rev.isCorrect ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
-                    rev.selectedOption === -1 ? 'bg-slate-800 text-slate-400' :
-                    'bg-red-950 text-red-400 border border-red-800'
+                    rev.isCorrect ? 'bg-[#D1FAE5] text-[#065F46] border border-[#10B981]' :
+                    rev.selectedOption === -1 ? 'bg-[#EFE9DC] text-[#66635D]' :
+                    'bg-[#FEE2E2] text-[#991B1B] border border-[#EF4444]'
                   }`}>
                     {rev.isCorrect ? 'CORRECT (+1.0)' : rev.selectedOption === -1 ? 'UNATTEMPTED (0.0)' : `WRONG (-${config.negativeMarking})`}
                   </span>
                 </div>
 
-                <p className="font-bold text-slate-100 text-sm">{rev.question}</p>
+                <p className="font-extrabold text-[#252525] text-sm leading-relaxed opacity-100">{rev.question}</p>
 
                 <div className="grid grid-cols-2 gap-2">
                   {rev.options.map((opt, oIdx) => {
                     const isSelected = rev.selectedOption === oIdx;
                     const isCorrect = rev.correctAnswer === oIdx;
                     
-                    let style = 'bg-slate-900 border-slate-800 text-slate-300';
-                    if (isCorrect) style = 'bg-emerald-950/80 border-emerald-500/80 text-emerald-200 font-bold';
-                    else if (isSelected && !isCorrect) style = 'bg-red-950/80 border-red-500/80 text-red-200 font-bold';
+                    let style = 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]';
+                    if (isCorrect) style = 'bg-[#D1FAE5] border-[#10B981] text-[#065F46] font-bold';
+                    else if (isSelected && !isCorrect) style = 'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-bold';
 
                     return (
                       <div key={oIdx} className={`p-2.5 rounded-lg border text-xs ${style}`}>
                         <strong className="mr-1">{String.fromCharCode(65 + oIdx)}:</strong> {opt}
-                        {isCorrect && <span className="ml-2 text-emerald-400 font-bold">(Correct Answer)</span>}
-                        {isSelected && !isCorrect && <span className="ml-2 text-red-400 font-bold">(Your Choice)</span>}
+                        {isCorrect && <span className="ml-2 text-[#065F46] font-bold">(Correct Answer)</span>}
+                        {isSelected && !isCorrect && <span className="ml-2 text-[#991B1B] font-bold">(Your Choice)</span>}
                       </div>
                     );
                   })}
                 </div>
 
                 {rev.explanation && (
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 text-[11px] space-y-1">
-                    <span className="font-bold text-purple-400 block">Explanation:</span>
-                    <p>{rev.explanation}</p>
+                  <div className="p-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#252525] text-[11px] space-y-1">
+                    <span className="font-bold text-[#244A73] block">Explanation:</span>
+                    <p className="text-[#252525] leading-relaxed">{rev.explanation}</p>
                   </div>
                 )}
               </div>

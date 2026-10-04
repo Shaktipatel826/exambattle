@@ -250,24 +250,24 @@ export const MultiplayerBattlePage = ({ token, user }) => {
           </span>
 
           <div>
-            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider block">Share Room Code</span>
-            <span className="text-4xl font-mono font-black text-amber-400 tracking-widest select-all bg-slate-950 px-6 py-2 rounded-2xl border border-slate-800 inline-block mt-2">
+            <span className="text-xs text-[#66635D] font-semibold uppercase tracking-wider block">Share Room Code</span>
+            <span className="text-4xl font-mono font-black text-[#244A73] tracking-widest select-all bg-[#F7F3EA] px-6 py-2 rounded-2xl border border-[#E2DACB] inline-block mt-2">
               {roomState.roomCode}
             </span>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
-            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+          <div className="p-4 rounded-xl bg-[#FFFDF8] border border-[#E2DACB] space-y-3 shadow-sm">
+            <h3 className="text-xs font-bold text-[#252525] uppercase tracking-wider">
               Connected Aspirants ({roomState.players.length}/4)
             </h3>
             <div className="space-y-2">
               {roomState.players.map((p, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs font-bold text-slate-200">
+                <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-[#F7F3EA] border border-[#E2DACB] text-xs font-bold text-[#252525]">
                   <div className="flex items-center space-x-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="w-2 h-2 rounded-full bg-[#2D6A4F] animate-pulse"></span>
                     <span>{p.name} {p.userId === roomState.hostId && '(Host)'}</span>
                   </div>
-                  <span className="text-emerald-400 text-[10px] px-2 py-0.5 rounded bg-emerald-950 border border-emerald-800">
+                  <span className="text-[#2D6A4F] text-[10px] px-2 py-0.5 rounded bg-[#EFE9DC] border border-[#2D6A4F]/30 font-bold">
                     READY
                   </span>
                 </div>
@@ -278,12 +278,12 @@ export const MultiplayerBattlePage = ({ token, user }) => {
           {isHost ? (
             <button
               onClick={handleStartBattle}
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-2"
+              className="w-full py-3.5 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
             >
-              <Play className="w-4 h-4 fill-slate-950" /> START MULTIPLAYER BATTLE NOW
+              <Play className="w-4 h-4 fill-white" /> START MULTIPLAYER BATTLE NOW
             </button>
           ) : (
-            <p className="text-xs text-amber-400 font-semibold animate-pulse">
+            <p className="text-xs text-[#244A73] font-semibold animate-pulse">
               Waiting for room host to start the battle...
             </p>
           )}
@@ -296,11 +296,11 @@ export const MultiplayerBattlePage = ({ token, user }) => {
   if (roomState.status === 'FINISHED' && leaderboard) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-        <div className="glass-panel p-8 rounded-3xl border border-amber-500/50 text-center space-y-6">
-          <div className="w-16 h-16 mx-auto rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/40">
-            <Trophy className="w-8 h-8" />
+        <div className="bg-[#FFFDF8] p-8 rounded-3xl border border-[#E2DACB] shadow-sm text-center space-y-6">
+          <div className="w-16 h-16 mx-auto rounded-full bg-[#EFE9DC] text-[#244A73] flex items-center justify-center border border-[#E2DACB]">
+            <Trophy className="w-8 h-8 text-[#244A73]" />
           </div>
-          <h2 className="text-2xl font-black text-white">BATTLE FINAL LEADERBOARD</h2>
+          <h2 className="text-2xl font-black text-[#252525]">BATTLE FINAL LEADERBOARD</h2>
 
           <div className="space-y-3">
             {leaderboard.map((item) => {
@@ -310,8 +310,8 @@ export const MultiplayerBattlePage = ({ token, user }) => {
                   key={item.userId}
                   className={`flex items-center justify-between p-4 rounded-xl border text-xs font-bold transition-all ${
                     item.rank === 1
-                      ? 'bg-amber-950/40 border-amber-500/60 text-amber-200'
-                      : 'bg-slate-950 border-slate-800 text-slate-200'
+                      ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73]'
+                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
                   }`}
                 >
                   <div className="flex items-center space-x-3">
@@ -319,8 +319,8 @@ export const MultiplayerBattlePage = ({ token, user }) => {
                     <span>{item.name}</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-sm font-black text-amber-400 block">{item.score} PTS</span>
-                    <span className="text-[10px] text-slate-400 font-normal">{item.accuracy}% Accuracy</span>
+                    <span className="text-sm font-black text-[#244A73] block">{item.score} PTS</span>
+                    <span className="text-[10px] text-[#66635D] font-normal">{item.accuracy}% Accuracy</span>
                   </div>
                 </div>
               );
@@ -329,7 +329,7 @@ export const MultiplayerBattlePage = ({ token, user }) => {
 
           <button
             onClick={handleRematch}
-            className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2"
+            className="w-full py-3.5 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
           >
             <RotateCcw className="w-4 h-4" /> REMATCH (SAME PLAYERS)
           </button>
@@ -345,27 +345,27 @@ export const MultiplayerBattlePage = ({ token, user }) => {
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
       
       {/* Top Synchronized Server Status & Timer Header */}
-      <div className="glass-panel p-4 rounded-xl border border-amber-500/40 flex justify-between items-center bg-slate-950">
+      <div className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] flex justify-between items-center shadow-sm">
         <div className="flex items-center space-x-2">
           <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
-          <span className="text-xs font-black text-amber-300">LIVE BATTLE ARENA</span>
+          <span className="text-xs font-black text-[#244A73]">LIVE BATTLE ARENA</span>
         </div>
 
-        <div className="flex items-center space-x-1.5 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800 text-xs font-black text-white">
-          <Clock className="w-4 h-4 text-amber-400" />
+        <div className="flex items-center space-x-1.5 bg-[#F7F3EA] px-3 py-1 rounded-xl border border-[#E2DACB] text-xs font-black text-[#244A73]">
+          <Clock className="w-4 h-4 text-[#244A73]" />
           <span>{formatTimer(timeLeft)}</span>
         </div>
       </div>
 
       {/* Live Question Box */}
       {currentQ && (
-        <div className="glass-panel p-6 rounded-2xl border border-slate-700/80 space-y-5">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400">
+        <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm space-y-5">
+          <div className="flex justify-between items-center text-xs font-bold text-[#66635D]">
             <span>Question {currentQIndex + 1} of {roomState.questions.length}</span>
             <span>Subject: {roomState.config.subject}</span>
           </div>
 
-          <p className="text-sm sm:text-base font-bold text-slate-100 leading-relaxed">
+          <p className="text-sm sm:text-base font-extrabold text-[#252525] leading-relaxed opacity-100">
             {currentQ.question}
           </p>
 
@@ -382,22 +382,22 @@ export const MultiplayerBattlePage = ({ token, user }) => {
                   onClick={() => handleAnswerSubmit(oIdx)}
                   className={`w-full text-left p-3.5 rounded-xl border text-xs sm:text-sm font-semibold transition-all flex items-center justify-between ${
                     isChosen
-                      ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                      ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73] font-black shadow-sm'
+                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525] hover:border-[#244A73]'
                   }`}
                 >
-                  <span><strong className="mr-2">{String.fromCharCode(65 + oIdx)}.</strong> {opt}</span>
-                  {isChosen && <CheckCircle2 className="w-5 h-5 text-amber-400 shrink-0" />}
+                  <span className="text-[#252525] font-semibold"><strong className="mr-2 text-[#244A73]">{String.fromCharCode(65 + oIdx)}.</strong> {opt}</span>
+                  {isChosen && <CheckCircle2 className="w-5 h-5 text-[#244A73] shrink-0" />}
                 </button>
               );
             })}
           </div>
 
-          <div className="pt-4 border-t border-slate-800 flex justify-end">
+          <div className="pt-4 border-t border-[#E2DACB] flex justify-end">
             {currentQIndex < roomState.questions.length - 1 && (
               <button
                 onClick={() => setCurrentQIndex(currentQIndex + 1)}
-                className="py-2.5 px-6 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs"
+                className="py-2.5 px-6 rounded-lg bg-[#244A73] hover:bg-[#1B3857] text-white font-bold text-xs"
               >
                 Next Question
               </button>
