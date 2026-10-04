@@ -976,14 +976,12 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab, onTakeTest, onC
                   />
                 </div>
                 <div>
-                  <label className="block text-[#252525] mb-1 font-bold">Target MCQ Recommendation</label>
+                  <label className="block text-[#252525] mb-1 font-bold">Extraction Mode</label>
                   <input
-                    type="number"
-                    min={5}
-                    max={150}
-                    value={aiForm.count}
-                    onChange={e => setAiForm({ ...aiForm, count: Number(e.target.value) })}
-                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                    type="text"
+                    disabled
+                    value="UNCONSTRAINED MAX EXTRACTION (All Chunks)"
+                    className="w-full bg-[#E2DACB]/50 border border-[#E2DACB] rounded-xl px-3 py-2 text-[#244A73] font-extrabold text-xs"
                   />
                 </div>
               </div>

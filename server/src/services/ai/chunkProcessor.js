@@ -7,7 +7,7 @@ import { AIJob } from '../../models/AIJob.js';
 /**
  * Split text into logical chunks on paragraph/heading/timestamp boundaries without cutting sentences
  */
-export const splitTextIntoLogicalChunks = (text, targetChunkChars = 3500) => {
+export const splitTextIntoLogicalChunks = (text, targetChunkChars = 4000) => {
   if (!text || typeof text !== 'string') return [];
   const clean = text.trim();
   if (clean.length <= targetChunkChars) return [clean];
@@ -45,6 +45,13 @@ const normalizeQuestionText = (text = '') => {
 };
 
 /**
+ * Helper to escape regex special characters
+ */
+const escapeRegex = (string = '') => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+/**
  * Process AI Job: Extract MAXIMUM source-grounded MCQs across ALL chunks without artificial caps.
  * Strictly NO Study Notes, NO One-Liners, NO Summaries, NO Flashcards for Admin AI Question Generator.
  */
@@ -55,7 +62,6 @@ export const processAIContentJob = async ({
   topic = 'General',
   exam = 'General',
   difficulty = 'Medium',
-  mcqCount = 10,
   createdBy = 'Admin'
 }) => {
   const job = await AIJob.findOne({ jobId });
@@ -65,33 +71,39 @@ export const processAIContentJob = async ({
     job.status = 'PROCESSING';
     job.totalChars = extractedText.length;
     
-    // Split complete document into 3500-char logical chunks
-    const chunks = splitTextIntoLogicalChunks(extractedText, 3500);
+    // Split complete document into 4000-char logical chunks
+    const chunks = splitTextIntoLogicalChunks(extractedText, 4000);
     job.totalChunks = chunks.length;
     await job.save();
 
-    let accumulatedMcqs = [];
-    let completedChunks = 0;
-    let failedChunks = 0;
+    console.log(`[AI-GEN] Source characters: ${extractedText.length}`);
+    console.log(`[AI-GEN] Total chunks: ${chunks.length}`);
+
+    let rawExtractedCount = 0;
     let duplicateCount = 0;
     let invalidCount = 0;
+    let completedChunks = 0;
+    let failedChunks = 0;
 
-    // Track normalized questions seen in this batch to prevent internal duplicates
+    const accumulatedMcqs = [];
     const seenInBatch = new Set();
 
     // Process ALL chunks (Chunk 1 to Chunk N) without stopping
     for (let i = 0; i < chunks.length; i++) {
       const chunkText = chunks[i];
-      console.log(`[AI Job ${jobId}] Processing Chunk ${i + 1}/${chunks.length} (${chunkText.length} chars)...`);
+      console.log(`[AI-GEN] Processing chunk ${i + 1}/${chunks.length} (${chunkText.length} chars)...`);
 
       try {
         // Prompt Gemini to extract maximum source-grounded MCQs from this chunk
-        const targetPerChunk = Math.max(5, Math.ceil(mcqCount / chunks.length));
-        const prompt = buildMcqPrompt(chunkText, subject, topic, exam, difficulty, targetPerChunk);
+        const prompt = buildMcqPrompt(chunkText, subject, topic, exam, difficulty);
         const rawOutput = await executeGeminiPrompt(prompt);
         const parsed = parseCleanJSON(rawOutput);
 
         if (parsed && Array.isArray(parsed.mcqs)) {
+          const chunkMcqCount = parsed.mcqs.length;
+          rawExtractedCount += chunkMcqCount;
+          console.log(`[AI-GEN] Chunk ${i + 1} MCQs extracted: ${chunkMcqCount}`);
+
           for (const rawQ of parsed.mcqs) {
             const valQ = validateMCQSchema(rawQ, subject, topic);
             if (!valQ) {
@@ -104,23 +116,28 @@ export const processAIContentJob = async ({
             // Check internal duplicate within current job batch
             if (seenInBatch.has(normKey)) {
               duplicateCount++;
-              continue; // Skip exact duplicate inside same batch
+              console.log(`[AI-GEN] Batch Duplicate skipped: "${valQ.question.substring(0, 50)}..."`);
+              continue;
             }
             seenInBatch.add(normKey);
 
             // Check duplicate in MongoDB Question Bank
-            const existingInDb = await Question.findOne({ question: valQ.question.trim() });
+            const existingInDb = await Question.findOne({
+              question: { $regex: new RegExp(`^${escapeRegex(valQ.question.trim())}$`, 'i') }
+            });
+
             valQ.duplicateFlag = !!existingInDb;
             valQ.sourceReference = `Chunk ${i + 1} (${valQ.sourceReference || 'Source Material'})`;
 
             accumulatedMcqs.push(valQ);
           }
         } else {
+          console.warn(`[AI-GEN] Chunk ${i + 1} did not return valid MCQs array.`);
           invalidCount++;
         }
       } catch (chunkErr) {
         failedChunks++;
-        console.warn(`[AI Job ${jobId}] Chunk ${i + 1} failed: ${chunkErr.message}. Continuing with remaining chunks.`);
+        console.warn(`[AI-GEN] Chunk ${i + 1} failed: ${chunkErr.message}. Continuing with remaining chunks.`);
       }
 
       completedChunks++;
@@ -132,7 +149,11 @@ export const processAIContentJob = async ({
     const savedPendingMCQs = [];
 
     for (const q of accumulatedMcqs) {
-      if (q.duplicateFlag) duplicateCount++;
+      if (q.duplicateFlag) {
+        duplicateCount++;
+        console.log(`[AI-GEN] MongoDB Duplicate flagged: "${q.question.substring(0, 50)}..."`);
+        // If question already exists in MongoDB, mark duplicateFlag true
+      }
 
       const newQ = await Question.create({
         question: q.question,
@@ -180,6 +201,9 @@ export const processAIContentJob = async ({
     job.pendingReviewCount = savedPendingMCQs.length;
     await job.save();
 
+    console.log(`[AI-GEN] Raw MCQs: ${rawExtractedCount}`);
+    console.log(`[AI-GEN] Duplicates removed/flagged: ${duplicateCount}`);
+    console.log(`[AI-GEN] Final unique MCQs saved to MongoDB: ${savedPendingMCQs.length}`);
     console.log(`[AI Job ${jobId}] SUCCESS: Generated & Saved ${savedPendingMCQs.length} MCQs across ${completedChunks} chunks.`);
     return job;
   } catch (err) {

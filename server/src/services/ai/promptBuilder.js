@@ -61,19 +61,22 @@ ${textChunk}
   `;
 };
 
-export const buildMcqPrompt = (textChunk, subject, topic, exam = 'General', difficulty = 'Medium', count = 10) => {
+export const buildMcqPrompt = (textChunk, subject, topic, exam = 'General', difficulty = 'Medium') => {
   return `
 You are a senior exam paper setter for Indian competitive exams (${exam}).
-Extract as many distinct, source-grounded, exam-relevant Multiple Choice Questions (MCQs) as the provided content reasonably supports (aim for up to ${Math.max(5, count)} questions depending on content density).
-Do NOT artificially limit the output to a small fixed number. Cover different facts, dates, constitutional articles, amendments, provisions, persons, events, definitions, concepts, numbers, examples, and important factual statements present in the source content.
+Read this source material carefully and extract EVERY distinct, exam-relevant Multiple Choice Question (MCQ) that can be directly supported by the provided material.
 
-Rules:
-1. Every question MUST be strictly grounded in the provided source content. Do NOT hallucinate or invent facts outside the text.
-2. Exactly 4 distinct options for each question.
-3. Exactly 1 correct answer (index 0, 1, 2, or 3).
-4. Explanation must explain why the correct option is right based on the source text.
-5. Mix correct option indices (A, B, C, D across questions).
-6. Do NOT generate study notes, summaries, or flashcards. Generate ONLY MCQs.
+CRITICAL INSTRUCTIONS:
+1. Do NOT stop after a fixed small number (like 5, 8, or 10).
+2. Do NOT return a fixed number of questions.
+3. Do NOT summarize. Do NOT create study notes. Do NOT create flashcards. Do NOT create one-liners. Generate MCQs ONLY.
+4. Do NOT invent facts or hallucinate information that is not supported by the source.
+5. Extract as many distinct high-quality MCQs as the source material reasonably supports.
+6. If the source material contains pre-existing formatted questions (e.g. Q1, Q2, Q3...), parse, preserve, and structure ALL of those questions without skipping any.
+7. If the source material contains factual statements, dates, constitutional articles, amendments, provisions, events, definitions, concepts, numbers, persons, classifications, comparisons, statistics, or exam-oriented statements, generate a separate distinct MCQ for each supported fact.
+8. Each question MUST have exactly 4 distinct options and exactly 1 correct answer index (0, 1, 2, or 3).
+9. Mix correct answer option indices (A, B, C, D) across generated questions.
+10. Continue extracting questions until ALL useful material in this source chunk has been exhausted.
 
 Subject: ${subject}
 Topic: ${topic}
@@ -87,7 +90,7 @@ Output MUST be a JSON object with schema:
       "question": "Clear exam question statement...",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correct_answer": 0,
-      "explanation": "Clear rationale grounded in text...",
+      "explanation": "Clear rationale directly supported by source text...",
       "subject": "${subject}",
       "topic": "${topic}",
       "difficulty": "${difficulty}",
@@ -98,7 +101,7 @@ Output MUST be a JSON object with schema:
   ]
 }
 
-Return ONLY valid JSON.
+Return ONLY valid JSON matching this schema. No markdown outside the JSON block.
 
 Source Content:
 ${textChunk}

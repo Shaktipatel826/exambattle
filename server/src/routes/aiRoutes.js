@@ -181,12 +181,11 @@ router.post('/admin-generate-job', authMiddleware, adminGuard, upload.single('fi
     }
 
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const generationType = req.body.generationType || 'ALL';
+    const generationType = 'MCQS';
     const subject = req.body.subject || 'General Studies';
     const topic = req.body.topic || 'General';
     const exam = req.body.exam || 'General';
     const difficulty = req.body.difficulty || 'Medium';
-    const mcqCount = Number(req.body.mcqCount || 5);
 
     // Initial Job Creation
     const job = await AIJob.create({
@@ -204,7 +203,7 @@ router.post('/admin-generate-job', authMiddleware, adminGuard, upload.single('fi
       totalChars: extractedText.length
     });
 
-    // Run Chunk Processor Pipeline
+    // Run Chunk Processor Pipeline (Unconstrained Max Extraction)
     const processedJob = await processAIContentJob({
       jobId,
       extractedText,
@@ -213,13 +212,12 @@ router.post('/admin-generate-job', authMiddleware, adminGuard, upload.single('fi
       topic,
       exam,
       difficulty,
-      mcqCount,
       createdBy: req.user.name || 'Admin'
     });
 
     return res.status(201).json({
       success: true,
-      message: `AI Job completed! Generated ${processedJob.generatedMcqCount} MCQs, ${processedJob.generatedOneLinersCount} One-Liners, and Study Notes.`,
+      message: `AI Job completed! Extracted and saved ${processedJob.generatedMcqCount} MCQs into MongoDB Question Bank.`,
       job: processedJob
     });
   } catch (err) {
