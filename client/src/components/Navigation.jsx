@@ -15,8 +15,15 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
     { id: 'HOME', label: 'Home', icon: Home },
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
+    { id: 'AI_STUDY', label: 'AI Study', icon: Sparkles },
+    { id: 'PROFILE', label: 'Profile', icon: User, isProfile: true }
+  ];
+
+  const desktopStudentItems = [
+    { id: 'HOME', label: 'Home', icon: Home },
+    { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
+    { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
     { id: 'AI_STUDY', label: 'AI Study Lab', icon: Sparkles },
-    { id: 'PROFILE', label: 'Profile / Logout', icon: User, isProfile: true },
     { id: 'REVISION', label: 'Revision', icon: RefreshCw },
     { id: 'GAMIFICATION', label: 'Progress', icon: Trophy },
     { id: 'SOCIAL', label: 'Friends', icon: Users },
@@ -31,7 +38,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
     { id: 'ADMIN_REPORTS', label: 'Report Queue', icon: AlertTriangle }
   ];
 
-  const items = isAdmin ? [...adminNavItems, ...studentNavItems] : studentNavItems;
+  const items = isAdmin ? [...adminNavItems, ...desktopStudentItems] : desktopStudentItems;
 
   const handleLogoutClick = () => {
     setProfileOpen(false);
@@ -77,8 +84,6 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
                     className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                       isActive
                         ? 'bg-[#244A73] text-white shadow-sm'
-                        : item.isProfile
-                        ? 'bg-[#FFFDF8] text-[#9E2A2B] border border-[#E2DACB] hover:bg-[#F7F3EA] font-bold'
                         : item.highlight
                         ? 'bg-[#FFFDF8] text-[#244A73] border border-[#244A73]/30 hover:bg-[#F7F3EA]'
                         : 'text-[#66635D] hover:text-[#252525] hover:bg-[#E2DACB]/50'
@@ -91,40 +96,30 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
               })}
             </div>
 
-            {/* Touch-Friendly High-Visibility Top-Right Profile / Account Launcher */}
+            {/* Single Touch-Friendly Profile Launcher in Header */}
             <div className="flex items-center space-x-2">
               {user && (
                 <button
                   onClick={() => setProfileOpen(true)}
-                  aria-label="Account Profile & Logout"
+                  aria-label="Account Profile"
                   className="flex items-center space-x-2 bg-[#FFFDF8] border border-[#D5CDBF] hover:border-[#244A73] rounded-full px-3 py-1.5 text-xs transition-all active:scale-95 shadow-sm"
                 >
                   <div className="w-6 h-6 rounded-full bg-[#244A73] flex items-center justify-center text-white font-bold text-[11px]">
                     {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                   </div>
                   <span className="font-bold text-[#252525] text-[11px]">
-                    Profile & Logout
+                    Profile
                   </span>
-                  <LogOut className="w-3.5 h-3.5 text-[#9E2A2B] shrink-0" />
                 </button>
               )}
-
-              {/* Direct Desktop/Quick Logout Button */}
-              <button
-                onClick={onLogout}
-                title="Logout Account"
-                className="hidden sm:flex p-2 text-[#66635D] hover:text-[#9E2A2B] hover:bg-[#E2DACB]/60 rounded-lg transition-colors"
-              >
-                <LogOut className="w-4.5 h-4.5" />
-              </button>
             </div>
 
           </div>
         </div>
 
-        {/* Mobile Bottom Navigation Bar - includes explicit Profile / Logout tab */}
+        {/* Mobile Bottom Navigation Bar - includes single Profile tab */}
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#EFE9DC] border-t border-[#E2DACB] px-1 py-1.5 z-50 flex justify-around items-center shadow-lg">
-          {studentNavItems.slice(0, 5).map((item) => {
+          {studentNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
@@ -133,13 +128,13 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
                 onClick={() => handleItemClick(item)}
                 className={`flex flex-col items-center py-1 px-2 rounded-xl text-[10px] font-semibold transition-all ${
                   item.isProfile
-                    ? 'text-[#9E2A2B] font-bold bg-[#FFFDF8] border border-[#E2DACB] px-2.5 shadow-sm'
+                    ? 'text-[#244A73] font-bold bg-[#FFFDF8] border border-[#E2DACB] px-2.5 shadow-sm'
                     : isActive
                     ? 'text-[#244A73] font-bold bg-[#FFFDF8] border border-[#E2DACB] px-2 shadow-sm'
                     : 'text-[#66635D] hover:text-[#252525]'
                 }`}
               >
-                <Icon className={`w-5 h-5 mb-0.5 ${item.isProfile ? 'text-[#9E2A2B]' : ''}`} />
+                <Icon className="w-5 h-5 mb-0.5" />
                 <span>{item.label}</span>
               </button>
             );
@@ -147,7 +142,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
         </div>
       </nav>
 
-      {/* Profile & Account Details Modal / Bottom Sheet */}
+      {/* Account Profile Details Modal / Sheet */}
       {profileOpen && user && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#252525]/40 backdrop-blur-xs animate-fadeIn">
           <div 
@@ -227,14 +222,14 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
               </div>
             )}
 
-            {/* Action Buttons: Logout */}
+            {/* Single Logout Button */}
             <div className="pt-2">
               <button
                 onClick={handleLogoutClick}
                 className="w-full py-3 px-4 bg-[#9E2A2B] hover:bg-[#7E2223] active:scale-[0.98] text-white rounded-xl font-bold flex items-center justify-center space-x-2 text-xs shadow-sm transition-all"
               >
                 <LogOut className="w-4 h-4" />
-                <span>Logout Account</span>
+                <span>Logout</span>
               </button>
             </div>
           </div>

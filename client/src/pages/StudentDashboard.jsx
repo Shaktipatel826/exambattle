@@ -79,30 +79,21 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
         {[
           { id: 'DASHBOARD', label: 'Student Home', icon: BookOpen },
           { id: 'LEADERBOARD', label: 'Leaderboard', icon: Trophy },
-          { id: 'ACHIEVEMENTS', label: 'Badges & Rewards', icon: Award },
-          { id: 'PROFILE', label: 'My Profile & Logout', icon: User, isProfile: true }
+          { id: 'ACHIEVEMENTS', label: 'Badges & Rewards', icon: Award }
         ].map(tab => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => {
-                if (tab.isProfile && onOpenProfile) {
-                  onOpenProfile();
-                } else {
-                  setActiveTab(tab.id);
-                }
-              }}
+              onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
-                tab.isProfile
-                  ? 'bg-[#FFFDF8] border-[#9E2A2B] text-[#9E2A2B] hover:bg-[#FDF2F2] active:scale-95 shadow-sm'
-                  : active
+                active
                   ? 'bg-[#244A73] text-white border-[#1B3857] shadow-sm'
                   : 'bg-[#FFFDF8] border-[#E2DACB] text-[#66635D] hover:text-[#252525] hover:bg-[#EFE9DC]'
               }`}
             >
-              <Icon className={`w-4 h-4 ${tab.isProfile ? 'text-[#9E2A2B]' : ''}`} />
+              <Icon className="w-4 h-4" />
               <span>{tab.label}</span>
             </button>
           );
@@ -126,22 +117,10 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
                   </span>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center justify-between">
                   <h1 className="text-2xl sm:text-3xl font-black text-[#244A73]">
                     Welcome back, <span>{user?.name || 'Aspirant'} 👋</span>
                   </h1>
-
-                  {/* Banner Profile & Logout Button */}
-                  {onOpenProfile && (
-                    <button
-                      onClick={onOpenProfile}
-                      className="px-4 py-2 bg-[#FFFDF8] text-[#244A73] border border-[#244A73] hover:bg-[#F7F3EA] rounded-xl font-bold flex items-center gap-2 text-xs shadow-sm active:scale-95 transition-all"
-                    >
-                      <User className="w-4 h-4 text-[#244A73]" />
-                      <span>My Profile & Logout</span>
-                      <LogOut className="w-3.5 h-3.5 text-[#9E2A2B]" />
-                    </button>
-                  )}
                 </div>
                 
                 {/* Level & XP Progress Bar */}
