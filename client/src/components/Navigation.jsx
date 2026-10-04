@@ -48,20 +48,20 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
 
   return (
     <>
-      <nav className="bg-slate-950/90 border-b border-slate-800 backdrop-blur-md sticky top-0 z-40">
+      <nav className="bg-[#EFE9DC] border-b border-[#E2DACB] sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto px-3 sm:px-6">
           <div className="flex items-center justify-between h-16">
             
             {/* Logo & Title */}
             <div className="flex items-center space-x-2.5 cursor-pointer" onClick={() => setActiveTab(isAdmin ? 'ADMIN_DASH' : 'HOME')}>
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#244A73] flex items-center justify-center shadow-sm">
                 <Swords className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
               <div>
-                <span className="font-extrabold text-lg sm:text-xl tracking-tight bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-                  EXAMIQ
+                <span className="font-extrabold text-lg sm:text-xl tracking-tight text-[#244A73]">
+                  EXAMBATTLE
                 </span>
-                <span className="block text-[9px] sm:text-[10px] text-slate-400 font-semibold tracking-wider uppercase">AI Exam & Battle</span>
+                <span className="block text-[9px] sm:text-[10px] text-[#66635D] font-bold tracking-wider uppercase">Competitive Exam Preparation</span>
               </div>
             </div>
 
@@ -74,14 +74,14 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
                   <button
                     key={item.id}
                     onClick={() => handleItemClick(item)}
-                    className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                       isActive
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                        : item.highlight
-                        ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30'
+                        ? 'bg-[#244A73] text-white shadow-sm'
                         : item.isProfile
-                        ? 'bg-purple-950/60 text-purple-300 border border-purple-800/80 hover:bg-purple-900/80 font-bold'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                        ? 'bg-[#FFFDF8] text-[#9E2A2B] border border-[#E2DACB] hover:bg-[#F7F3EA] font-bold'
+                        : item.highlight
+                        ? 'bg-[#FFFDF8] text-[#244A73] border border-[#244A73]/30 hover:bg-[#F7F3EA]'
+                        : 'text-[#66635D] hover:text-[#252525] hover:bg-[#E2DACB]/50'
                     }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -97,15 +97,15 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
                 <button
                   onClick={() => setProfileOpen(true)}
                   aria-label="Account Profile & Logout"
-                  className="flex items-center space-x-1.5 bg-gradient-to-r from-purple-950/90 via-indigo-950/90 to-slate-900 border border-purple-500/50 hover:border-purple-400 rounded-full px-3 py-1.5 text-xs transition-all active:scale-95 shadow-md shadow-purple-950/50"
+                  className="flex items-center space-x-2 bg-[#FFFDF8] border border-[#D5CDBF] hover:border-[#244A73] rounded-full px-3 py-1.5 text-xs transition-all active:scale-95 shadow-sm"
                 >
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-white font-black text-[11px] shadow-sm">
+                  <div className="w-6 h-6 rounded-full bg-[#244A73] flex items-center justify-center text-white font-bold text-[11px]">
                     {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                   </div>
-                  <span className="font-extrabold text-purple-200 text-[11px]">
+                  <span className="font-bold text-[#252525] text-[11px]">
                     Profile & Logout
                   </span>
-                  <LogOut className="w-3.5 h-3.5 text-red-400 ml-0.5 shrink-0" />
+                  <LogOut className="w-3.5 h-3.5 text-[#9E2A2B] shrink-0" />
                 </button>
               )}
 
@@ -113,7 +113,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
               <button
                 onClick={onLogout}
                 title="Logout Account"
-                className="hidden sm:flex p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
+                className="hidden sm:flex p-2 text-[#66635D] hover:text-[#9E2A2B] hover:bg-[#E2DACB]/60 rounded-lg transition-colors"
               >
                 <LogOut className="w-4.5 h-4.5" />
               </button>
@@ -123,7 +123,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
         </div>
 
         {/* Mobile Bottom Navigation Bar - includes explicit Profile / Logout tab */}
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-950/95 border-t border-slate-800 backdrop-blur-lg px-1 py-1.5 z-50 flex justify-around items-center">
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#EFE9DC] border-t border-[#E2DACB] px-1 py-1.5 z-50 flex justify-around items-center shadow-lg">
           {studentNavItems.slice(0, 5).map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -131,15 +131,15 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
               <button
                 key={item.id}
                 onClick={() => handleItemClick(item)}
-                className={`flex flex-col items-center py-1 px-1.5 rounded-xl text-[10px] font-medium transition-all ${
+                className={`flex flex-col items-center py-1 px-2 rounded-xl text-[10px] font-semibold transition-all ${
                   item.isProfile
-                    ? 'text-purple-300 font-bold bg-purple-950/60 border border-purple-800/80 px-2'
+                    ? 'text-[#9E2A2B] font-bold bg-[#FFFDF8] border border-[#E2DACB] px-2.5 shadow-sm'
                     : isActive
-                    ? 'text-blue-400 font-bold bg-blue-950/40'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'text-[#244A73] font-bold bg-[#FFFDF8] border border-[#E2DACB] px-2 shadow-sm'
+                    : 'text-[#66635D] hover:text-[#252525]'
                 }`}
               >
-                <Icon className={`w-5 h-5 mb-0.5 ${item.isProfile ? 'text-red-400' : ''}`} />
+                <Icon className={`w-5 h-5 mb-0.5 ${item.isProfile ? 'text-[#9E2A2B]' : ''}`} />
                 <span>{item.label}</span>
               </button>
             );
@@ -149,42 +149,42 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
 
       {/* Profile & Account Details Modal / Bottom Sheet */}
       {profileOpen && user && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#252525]/40 backdrop-blur-xs animate-fadeIn">
           <div 
-            className="w-full sm:max-w-md bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl space-y-5 animate-slideUp"
+            className="w-full sm:max-w-md bg-[#FFFDF8] border border-[#E2DACB] rounded-t-2xl sm:rounded-2xl p-5 shadow-xl space-y-5 animate-slideUp text-[#252525]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center justify-between border-b border-[#E2DACB] pb-3">
               <div className="flex items-center space-x-2">
-                <User className="w-5 h-5 text-blue-400" />
-                <h3 className="font-bold text-base text-slate-100">Account Profile</h3>
+                <User className="w-5 h-5 text-[#244A73]" />
+                <h3 className="font-extrabold text-base text-[#252525]">Account Profile</h3>
               </div>
               <button 
                 onClick={() => setProfileOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                className="p-1.5 text-[#66635D] hover:text-[#252525] rounded-lg hover:bg-[#EFE9DC] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Profile Avatar & Primary Info */}
-            <div className="flex items-center space-x-4 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-blue-500/20 relative">
+            <div className="flex items-center space-x-4 bg-[#F7F3EA] p-3.5 rounded-xl border border-[#E2DACB]">
+              <div className="w-14 h-14 rounded-2xl bg-[#244A73] flex items-center justify-center text-white font-black text-xl shadow-sm relative">
                 {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
-                <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-slate-900 rounded-full"></span>
+                <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-[#2D6A4F] border-2 border-white rounded-full"></span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-2">
-                  <h4 className="font-extrabold text-slate-100 text-sm truncate">{user.name}</h4>
-                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                    user.role === 'ADMIN' ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-blue-950 text-blue-300 border border-blue-800'
+                  <h4 className="font-bold text-[#252525] text-sm truncate">{user.name}</h4>
+                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${
+                    user.role === 'ADMIN' ? 'bg-[#244A73] text-white border-[#1B3857]' : 'bg-[#EFE9DC] text-[#244A73] border-[#D5CDBF]'
                   }`}>
                     {user.role || 'STUDENT'}
                   </span>
                 </div>
-                <div className="flex items-center space-x-1.5 text-xs text-slate-400 mt-1 truncate">
-                  <Mail className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <div className="flex items-center space-x-1.5 text-xs text-[#66635D] mt-1 truncate">
+                  <Mail className="w-3.5 h-3.5 text-[#66635D] shrink-0" />
                   <span className="truncate">{user.email}</span>
                 </div>
               </div>
@@ -192,23 +192,23 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
 
             {/* Stats Overview */}
             <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-950/40 border border-slate-800 p-3 rounded-xl flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
+              <div className="bg-[#F7F3EA] border border-[#E2DACB] p-3 rounded-xl flex items-center space-x-3">
+                <div className="p-2 rounded-lg bg-[#EFE9DC] text-[#D97706]">
                   <Award className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-400 uppercase font-semibold">Account Level</span>
-                  <span className="font-extrabold text-slate-100 text-sm">Level {user.level || 1}</span>
+                  <span className="block text-[10px] text-[#66635D] uppercase font-bold">Account Level</span>
+                  <span className="font-black text-[#252525] text-sm">Level {user.level || 1}</span>
                 </div>
               </div>
 
-              <div className="bg-slate-950/40 border border-slate-800 p-3 rounded-xl flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
+              <div className="bg-[#F7F3EA] border border-[#E2DACB] p-3 rounded-xl flex items-center space-x-3">
+                <div className="p-2 rounded-lg bg-[#EFE9DC] text-[#244A73]">
                   <Target className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-400 uppercase font-semibold">Experience</span>
-                  <span className="font-extrabold text-slate-100 text-sm">{user.xp || 0} XP</span>
+                  <span className="block text-[10px] text-[#66635D] uppercase font-bold">Experience</span>
+                  <span className="font-black text-[#252525] text-sm">{user.xp || 0} XP</span>
                 </div>
               </div>
             </div>
@@ -216,10 +216,10 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
             {/* Target Exams */}
             {user.targetExams && user.targetExams.length > 0 && (
               <div className="space-y-1.5">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Target Exams</span>
+                <span className="text-[11px] font-bold text-[#66635D] uppercase tracking-wider">Target Exams</span>
                 <div className="flex flex-wrap gap-1.5">
                   {user.targetExams.map((ex, idx) => (
-                    <span key={idx} className="bg-slate-800 text-slate-300 text-[11px] font-medium px-2.5 py-1 rounded-md border border-slate-700/50">
+                    <span key={idx} className="bg-[#EFE9DC] text-[#244A73] text-[11px] font-bold px-2.5 py-1 rounded-md border border-[#D5CDBF]">
                       {ex}
                     </span>
                   ))}
@@ -231,7 +231,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
             <div className="pt-2">
               <button
                 onClick={handleLogoutClick}
-                className="w-full py-3 px-4 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 active:scale-[0.98] text-white rounded-xl font-bold flex items-center justify-center space-x-2 text-xs shadow-lg shadow-red-600/30 transition-all"
+                className="w-full py-3 px-4 bg-[#9E2A2B] hover:bg-[#7E2223] active:scale-[0.98] text-white rounded-xl font-bold flex items-center justify-center space-x-2 text-xs shadow-sm transition-all"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Logout Account</span>

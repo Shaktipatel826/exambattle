@@ -53,8 +53,8 @@ const AppContent = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-400 text-xs font-semibold">
-        Loading ExamiQ Platform...
+      <div className="min-h-screen flex items-center justify-center bg-[#F7F3EA] text-[#252525] text-xs font-bold">
+        Loading ExamBattle Platform...
       </div>
     );
   }
@@ -64,7 +64,7 @@ const AppContent = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white pb-16 lg:pb-0">
+    <div className="min-h-screen bg-[#F7F3EA] text-[#252525] flex flex-col selection:bg-[#244A73] selection:text-white pb-16 lg:pb-0">
       
       {/* Top Header Navigation */}
       <Navigation
@@ -138,12 +138,12 @@ const AppContent = () => {
         )}
       </main>
 
-      {/* Floating AI Study Assistant Launcher Button */}
+      {/* Floating AI Assistant Launcher Button - Academic Theme */}
       <button
         onClick={() => setAssistantOpen(!assistantOpen)}
-        className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 p-3.5 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-xl shadow-purple-600/40 hover:scale-110 transition-all flex items-center space-x-2 text-xs font-bold"
+        className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 px-4 py-3 rounded-full bg-[#244A73] hover:bg-[#1B3857] text-white shadow-md border border-[#1B3857] hover:scale-105 active:scale-95 transition-all flex items-center space-x-2 text-xs font-bold"
       >
-        <Bot className="w-5 h-5" />
+        <Bot className="w-5 h-5 text-amber-300" />
         <span className="hidden sm:inline">Ask AI Assistant</span>
       </button>
 

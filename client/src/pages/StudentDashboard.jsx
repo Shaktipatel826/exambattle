@@ -72,10 +72,10 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
   const targetExams = user?.targetExams || ['SSC CGL', 'UP Police', 'Railway NTPC'];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 text-xs">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 text-xs text-[#252525]">
       
       {/* Top Navigation Sub-Tabs */}
-      <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
+      <div className="flex flex-wrap gap-2 border-b border-[#E2DACB] pb-3">
         {[
           { id: 'DASHBOARD', label: 'Student Home', icon: BookOpen },
           { id: 'LEADERBOARD', label: 'Leaderboard', icon: Trophy },
@@ -96,13 +96,13 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
               }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
                 tab.isProfile
-                  ? 'bg-purple-950/80 border-purple-600/80 text-purple-200 hover:bg-purple-900 active:scale-95 shadow-sm'
+                  ? 'bg-[#FFFDF8] border-[#9E2A2B] text-[#9E2A2B] hover:bg-[#FDF2F2] active:scale-95 shadow-sm'
                   : active
-                  ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  ? 'bg-[#244A73] text-white border-[#1B3857] shadow-sm'
+                  : 'bg-[#FFFDF8] border-[#E2DACB] text-[#66635D] hover:text-[#252525] hover:bg-[#EFE9DC]'
               }`}
             >
-              <Icon className={`w-4 h-4 ${tab.isProfile ? 'text-red-400' : ''}`} />
+              <Icon className={`w-4 h-4 ${tab.isProfile ? 'text-[#9E2A2B]' : ''}`} />
               <span>{tab.label}</span>
             </button>
           );
@@ -113,46 +113,46 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
         <div className="space-y-6">
           
           {/* Top Banner: Greeting, XP, Level, Streak & Profile/Logout Launcher */}
-          <div className="glass-panel rounded-3xl p-6 relative overflow-hidden bg-gradient-to-r from-slate-900 via-purple-950/30 to-slate-900 border border-purple-500/30">
+          <div className="bg-[#FFFDF8] rounded-2xl p-6 relative border border-[#E2DACB] shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
               
               <div className="space-y-2 flex-1">
-                <div className="flex items-center space-x-2 text-xs font-semibold text-purple-300 uppercase tracking-wider">
+                <div className="flex items-center space-x-2 text-xs font-bold text-[#244A73] uppercase tracking-wider">
                   <span>Target Exams Aspirant</span>
                   <span>•</span>
-                  <span className="text-amber-400 font-bold flex items-center gap-1">
-                    <Flame className="w-4 h-4 fill-amber-400 text-amber-500 animate-pulse" />
+                  <span className="text-[#D97706] font-bold flex items-center gap-1">
+                    <Flame className="w-4 h-4 fill-[#D97706] text-[#D97706]" />
                     {streak} Day Streak (Best: {longestStreak}d)
                   </span>
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h1 className="text-2xl sm:text-3xl font-black text-white">
-                    Welcome back, <span className="bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent">{user?.name || 'Aspirant'} 👋</span>
+                  <h1 className="text-2xl sm:text-3xl font-black text-[#244A73]">
+                    Welcome back, <span>{user?.name || 'Aspirant'} 👋</span>
                   </h1>
 
-                  {/* Prominent Banner Profile & Logout Button */}
+                  {/* Banner Profile & Logout Button */}
                   {onOpenProfile && (
                     <button
                       onClick={onOpenProfile}
-                      className="px-4 py-2 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 hover:from-purple-800 hover:to-indigo-800 text-purple-200 border border-purple-500/50 rounded-xl font-extrabold flex items-center gap-2 text-xs shadow-md shadow-purple-950/50 active:scale-95 transition-all"
+                      className="px-4 py-2 bg-[#FFFDF8] text-[#244A73] border border-[#244A73] hover:bg-[#F7F3EA] rounded-xl font-bold flex items-center gap-2 text-xs shadow-sm active:scale-95 transition-all"
                     >
-                      <User className="w-4 h-4 text-purple-300" />
+                      <User className="w-4 h-4 text-[#244A73]" />
                       <span>My Profile & Logout</span>
-                      <LogOut className="w-3.5 h-3.5 text-red-400" />
+                      <LogOut className="w-3.5 h-3.5 text-[#9E2A2B]" />
                     </button>
                   )}
                 </div>
                 
                 {/* Level & XP Progress Bar */}
                 <div className="space-y-1 max-w-md pt-1">
-                  <div className="flex justify-between text-[11px] font-bold text-slate-300">
-                    <span className="text-purple-300">Level {levelInfo.level}</span>
-                    <span className="text-amber-400 font-mono">{levelInfo.xpInCurrentLevel} / {levelInfo.xpRequiredForNext} XP</span>
+                  <div className="flex justify-between text-[11px] font-bold text-[#66635D]">
+                    <span className="text-[#244A73]">Level {levelInfo.level}</span>
+                    <span className="text-[#D97706] font-mono">{levelInfo.xpInCurrentLevel} / {levelInfo.xpRequiredForNext} XP</span>
                   </div>
-                  <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                  <div className="w-full h-2.5 bg-[#EFE9DC] rounded-full overflow-hidden border border-[#D5CDBF]">
                     <div
-                      className="h-full bg-gradient-to-r from-purple-600 to-indigo-400 transition-all duration-500"
+                      className="h-full bg-[#244A73] transition-all duration-500"
                       style={{ width: `${levelInfo.progressPercentage}%` }}
                     ></div>
                   </div>
@@ -160,22 +160,22 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
               </div>
 
               {/* Gamification Counters */}
-              <div className="flex items-center space-x-3 bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
-                <div className="text-center px-3 border-r border-slate-800">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">LEVEL</span>
-                  <span className="text-xl font-black text-purple-400">⭐ {levelInfo.level}</span>
+              <div className="flex items-center space-x-3 bg-[#F7F3EA] p-4 rounded-xl border border-[#E2DACB]">
+                <div className="text-center px-3 border-r border-[#E2DACB]">
+                  <span className="text-[10px] text-[#66635D] font-bold uppercase tracking-wider block">LEVEL</span>
+                  <span className="text-xl font-black text-[#244A73]">⭐ {levelInfo.level}</span>
                 </div>
-                <div className="text-center px-3 border-r border-slate-800">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">XP</span>
-                  <span className="text-xl font-black text-amber-400 flex items-center justify-center gap-1">
-                    <Zap className="w-4 h-4 fill-amber-400 text-amber-400" />
+                <div className="text-center px-3 border-r border-[#E2DACB]">
+                  <span className="text-[10px] text-[#66635D] font-bold uppercase tracking-wider block">XP</span>
+                  <span className="text-xl font-black text-[#D97706] flex items-center justify-center gap-1">
+                    <Zap className="w-4 h-4 fill-[#D97706] text-[#D97706]" />
                     {xp.toLocaleString()}
                   </span>
                 </div>
                 <div className="text-center px-3">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">COINS</span>
-                  <span className="text-xl font-black text-yellow-400 flex items-center justify-center gap-1">
-                    <Coins className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                  <span className="text-[10px] text-[#66635D] font-bold uppercase tracking-wider block">COINS</span>
+                  <span className="text-xl font-black text-[#D97706] flex items-center justify-center gap-1">
+                    <Coins className="w-4 h-4 fill-[#D97706] text-[#D97706]" />
                     {coins}
                   </span>
                 </div>
@@ -188,46 +188,46 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <button
               onClick={() => onNavigate('PRACTICE')}
-              className="glass-panel p-4 rounded-2xl flex flex-col items-center justify-center hover:scale-105 transition-all bg-gradient-to-br from-emerald-500/10 via-slate-900 to-slate-900 border-emerald-500/30 group"
+              className="bg-[#FFFDF8] p-4 rounded-xl flex flex-col items-center justify-center border border-[#E2DACB] hover:border-[#2D6A4F] hover:shadow-md transition-all group"
             >
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-2 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-slate-950 transition-all">
+              <div className="w-12 h-12 rounded-xl bg-[#E8F5E9] flex items-center justify-center mb-2 text-[#2D6A4F]">
                 <Target className="w-6 h-6" />
               </div>
-              <span className="text-xs font-bold text-white">DAILY CHALLENGE</span>
-              <span className="text-[10px] text-emerald-400 font-bold mt-0.5">+50 XP • +25 Coins</span>
+              <span className="text-xs font-extrabold text-[#252525]">DAILY CHALLENGE</span>
+              <span className="text-[10px] text-[#2D6A4F] font-bold mt-0.5">+50 XP • +25 Coins</span>
             </button>
 
             <button
               onClick={() => onNavigate('REVISION')}
-              className="glass-panel p-4 rounded-2xl flex flex-col items-center justify-center hover:scale-105 transition-all bg-gradient-to-br from-rose-500/10 via-slate-900 to-slate-900 border-rose-500/30 group"
+              className="bg-[#FFFDF8] p-4 rounded-xl flex flex-col items-center justify-center border border-[#E2DACB] hover:border-[#9E2A2B] hover:shadow-md transition-all group"
             >
-              <div className="w-12 h-12 rounded-xl bg-rose-500/20 flex items-center justify-center mb-2 text-rose-400 group-hover:bg-rose-500 group-hover:text-slate-950 transition-all">
+              <div className="w-12 h-12 rounded-xl bg-[#FDF2F2] flex items-center justify-center mb-2 text-[#9E2A2B]">
                 <RefreshCw className="w-6 h-6" />
               </div>
-              <span className="text-xs font-bold text-white">REVISION DUE</span>
-              <span className="text-[10px] text-rose-400 font-bold mt-0.5">{stats.mistakesRemaining || 0} Mistakes Due</span>
+              <span className="text-xs font-extrabold text-[#252525]">REVISION DUE</span>
+              <span className="text-[10px] text-[#9E2A2B] font-bold mt-0.5">{stats.mistakesRemaining || 0} Mistakes Due</span>
             </button>
 
             <button
               onClick={() => onNavigate('PRACTICE')}
-              className="glass-panel p-4 rounded-2xl flex flex-col items-center justify-center hover:scale-105 transition-all bg-gradient-to-br from-blue-500/10 via-slate-900 to-slate-900 border-blue-500/30 group"
+              className="bg-[#FFFDF8] p-4 rounded-xl flex flex-col items-center justify-center border border-[#E2DACB] hover:border-[#244A73] hover:shadow-md transition-all group"
             >
-              <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center mb-2 text-blue-400 group-hover:bg-blue-500 group-hover:text-slate-950 transition-all">
+              <div className="w-12 h-12 rounded-xl bg-[#EFE9DC] flex items-center justify-center mb-2 text-[#244A73]">
                 <BookOpen className="w-6 h-6" />
               </div>
-              <span className="text-xs font-bold text-white">SOLO TEST ENGINE</span>
-              <span className="text-[10px] text-blue-400 font-bold mt-0.5">Mock & PYQ Sets</span>
+              <span className="text-xs font-extrabold text-[#252525]">SOLO TEST ENGINE</span>
+              <span className="text-[10px] text-[#244A73] font-bold mt-0.5">Mock & PYQ Sets</span>
             </button>
 
             <button
               onClick={() => onNavigate('BATTLE')}
-              className="glass-panel p-4 rounded-2xl flex flex-col items-center justify-center hover:scale-105 transition-all bg-gradient-to-br from-purple-500/10 via-slate-900 to-slate-900 border-purple-500/30 group"
+              className="bg-[#FFFDF8] p-4 rounded-xl flex flex-col items-center justify-center border border-[#E2DACB] hover:border-[#D97706] hover:shadow-md transition-all group"
             >
-              <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center mb-2 text-purple-400 group-hover:bg-purple-500 group-hover:text-slate-950 transition-all">
+              <div className="w-12 h-12 rounded-xl bg-[#FFF8E1] flex items-center justify-center mb-2 text-[#D97706]">
                 <Swords className="w-6 h-6" />
               </div>
-              <span className="text-xs font-bold text-white">BATTLE FRIENDS</span>
-              <span className="text-[10px] text-purple-400 font-bold mt-0.5">Realtime 1v1 / 3P</span>
+              <span className="text-xs font-extrabold text-[#252525]">BATTLE FRIENDS</span>
+              <span className="text-[10px] text-[#D97706] font-bold mt-0.5">Realtime 1v1 / 3P</span>
             </button>
           </div>
 
@@ -239,28 +239,28 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
               
               {/* Performance Counters */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="glass-panel p-4 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 font-bold block">QUESTIONS ATTEMPTED</span>
-                  <span className="text-xl font-black text-white">{stats.totalQuestions || 0}</span>
+                <div className="bg-[#FFFDF8] p-4 rounded-xl border border-[#E2DACB] shadow-sm">
+                  <span className="text-[10px] text-[#66635D] font-bold block">QUESTIONS ATTEMPTED</span>
+                  <span className="text-xl font-black text-[#252525]">{stats.totalQuestions || 0}</span>
                 </div>
-                <div className="glass-panel p-4 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 font-bold block">OVERALL ACCURACY</span>
-                  <span className="text-xl font-black text-emerald-400">{stats.accuracy || 0}%</span>
+                <div className="bg-[#FFFDF8] p-4 rounded-xl border border-[#E2DACB] shadow-sm">
+                  <span className="text-[10px] text-[#66635D] font-bold block">OVERALL ACCURACY</span>
+                  <span className="text-xl font-black text-[#2D6A4F]">{stats.accuracy || 0}%</span>
                 </div>
-                <div className="glass-panel p-4 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 font-bold block">TESTS COMPLETED</span>
-                  <span className="text-xl font-black text-purple-400">{stats.testsCompleted || 0}</span>
+                <div className="bg-[#FFFDF8] p-4 rounded-xl border border-[#E2DACB] shadow-sm">
+                  <span className="text-[10px] text-[#66635D] font-bold block">TESTS COMPLETED</span>
+                  <span className="text-xl font-black text-[#244A73]">{stats.testsCompleted || 0}</span>
                 </div>
-                <div className="glass-panel p-4 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 font-bold block">MISTAKES MASTERED</span>
-                  <span className="text-xl font-black text-amber-400">{stats.masteredCount || 0}</span>
+                <div className="bg-[#FFFDF8] p-4 rounded-xl border border-[#E2DACB] shadow-sm">
+                  <span className="text-[10px] text-[#66635D] font-bold block">MISTAKES MASTERED</span>
+                  <span className="text-xl font-black text-[#D97706]">{stats.masteredCount || 0}</span>
                 </div>
               </div>
 
               {/* Subject Performance Progress Bars */}
-              <div className="glass-panel rounded-2xl p-5 border border-slate-800 space-y-4">
-                <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Trophy className="w-4 h-4 text-amber-400" /> Subject Accuracy Breakdown
+              <div className="bg-[#FFFDF8] rounded-2xl p-5 border border-[#E2DACB] shadow-sm space-y-4">
+                <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-[#D97706]" /> Subject Accuracy Breakdown
                 </h2>
 
                 <div className="space-y-3">
@@ -272,15 +272,15 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
                   ]).map(sub => (
                     <div key={sub.subject} className="space-y-1">
                       <div className="flex justify-between items-center text-xs">
-                        <span className="font-semibold text-slate-300">{sub.subject}</span>
-                        <span className={`font-bold ${sub.accuracy < 50 ? 'text-red-400' : 'text-emerald-400'}`}>
+                        <span className="font-bold text-[#252525]">{sub.subject}</span>
+                        <span className={`font-bold ${sub.accuracy < 50 ? 'text-[#9E2A2B]' : 'text-[#2D6A4F]'}`}>
                           {sub.accuracy}% Accuracy
                         </span>
                       </div>
-                      <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-900">
+                      <div className="w-full h-2.5 bg-[#EFE9DC] rounded-full overflow-hidden border border-[#D5CDBF]">
                         <div
                           className={`h-full transition-all duration-500 ${
-                            sub.accuracy >= 75 ? 'bg-emerald-500' : sub.accuracy >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                            sub.accuracy >= 75 ? 'bg-[#2D6A4F]' : sub.accuracy >= 50 ? 'bg-[#D97706]' : 'bg-[#9E2A2B]'
                           }`}
                           style={{ width: `${sub.accuracy}%` }}
                         ></div>
@@ -296,34 +296,34 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
             <div className="space-y-6">
               
               {/* Today's Study Plan */}
-              <div className="glass-panel rounded-2xl p-5 border border-purple-500/30 space-y-3">
-                <h3 className="text-xs font-bold text-purple-300 flex items-center gap-1.5 uppercase tracking-wider">
-                  <Calendar className="w-4 h-4 text-purple-400" /> TODAY'S DETERMINISTIC PLAN
+              <div className="bg-[#FFFDF8] rounded-2xl p-5 border border-[#E2DACB] shadow-sm space-y-3">
+                <h3 className="text-xs font-extrabold text-[#244A73] flex items-center gap-1.5 uppercase tracking-wider">
+                  <Calendar className="w-4 h-4 text-[#244A73]" /> TODAY'S STUDY PLAN
                 </h3>
                 
                 <div className="space-y-2">
-                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                    <span className="font-bold text-slate-200">1. Complete Daily Challenge</span>
-                    <p className="text-[11px] text-slate-400">10 Questions • Earn +50 XP</p>
+                  <div className="p-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] space-y-1">
+                    <span className="font-bold text-[#252525]">1. Complete Daily Challenge</span>
+                    <p className="text-[11px] text-[#66635D]">10 Questions • Earn +50 XP</p>
                   </div>
-                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                    <span className="font-bold text-slate-200">2. Revise Spaced Notebook</span>
-                    <p className="text-[11px] text-slate-400">{stats.mistakesRemaining || 0} questions due today</p>
+                  <div className="p-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] space-y-1">
+                    <span className="font-bold text-[#252525]">2. Revise Spaced Notebook</span>
+                    <p className="text-[11px] text-[#66635D]">{stats.mistakesRemaining || 0} questions due today</p>
                   </div>
-                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                    <span className="font-bold text-slate-200">3. Practice Weak Topic: Polity</span>
-                    <p className="text-[11px] text-slate-400">Targeted 10-question practice set</p>
+                  <div className="p-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] space-y-1">
+                    <span className="font-bold text-[#252525]">3. Practice Weak Topic: Polity</span>
+                    <p className="text-[11px] text-[#66635D]">Targeted 10-question practice set</p>
                   </div>
                 </div>
               </div>
 
               {/* Badges Preview */}
-              <div className="glass-panel rounded-2xl p-5 border border-slate-800 space-y-3">
+              <div className="bg-[#FFFDF8] rounded-2xl p-5 border border-[#E2DACB] shadow-sm space-y-3">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Award className="w-4 h-4 text-amber-400" /> BADGES & REWARDS
+                  <h3 className="text-xs font-extrabold text-[#252525] flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-[#D97706]" /> BADGES & REWARDS
                   </h3>
-                  <button onClick={() => setActiveTab('ACHIEVEMENTS')} className="text-[10px] text-purple-400 font-bold">
+                  <button onClick={() => setActiveTab('ACHIEVEMENTS')} className="text-[10px] text-[#244A73] font-bold">
                     View All
                   </button>
                 </div>
@@ -331,9 +331,9 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
                 <div className="grid grid-cols-3 gap-2 text-center">
                   {achievements.slice(0, 3).map(b => (
                     <div key={b.code} className={`p-2.5 rounded-xl border text-[10px] space-y-1 ${
-                      b.unlocked ? 'bg-amber-950/40 border-amber-500/60 text-amber-200 font-bold' : 'bg-slate-950 border-slate-800 text-slate-500'
+                      b.unlocked ? 'bg-[#FFF8E1] border-[#D97706]/60 text-[#252525] font-bold' : 'bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]'
                     }`}>
-                      <Award className={`w-5 h-5 mx-auto ${b.unlocked ? 'text-amber-400' : 'text-slate-600'}`} />
+                      <Award className={`w-5 h-5 mx-auto ${b.unlocked ? 'text-[#D97706]' : 'text-[#66635D]'}`} />
                       <span className="block truncate">{b.title}</span>
                     </div>
                   ))}
@@ -351,8 +351,8 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
       {activeTab === 'LEADERBOARD' && (
         <div className="space-y-4 max-w-3xl mx-auto">
           <div className="flex justify-between items-center">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-amber-400" /> Public Student Leaderboard (Privacy Protected)
+            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-[#D97706]" /> Public Student Leaderboard
             </h2>
             <div className="flex gap-2">
               {['allTime', 'weekly', 'monthly'].map(cat => (
@@ -362,8 +362,8 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
                     setLeaderboardCategory(cat);
                     fetchLeaderboard(cat);
                   }}
-                  className={`px-3 py-1 rounded text-xs font-bold border ${
-                    leaderboardCategory === cat ? 'bg-purple-600 text-white border-purple-500' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  className={`px-3 py-1 rounded-lg text-xs font-bold border ${
+                    leaderboardCategory === cat ? 'bg-[#244A73] text-white border-[#1B3857]' : 'bg-[#FFFDF8] border-[#E2DACB] text-[#66635D]'
                   }`}
                 >
                   {cat.toUpperCase()}
@@ -372,26 +372,26 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
             </div>
           </div>
 
-          <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-2">
+          <div className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] space-y-2 shadow-sm">
             {leaderboardData.map(entry => (
-              <div key={entry.userId} className="flex justify-between items-center p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+              <div key={entry.userId} className="flex justify-between items-center p-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-xs">
                 <div className="flex items-center gap-3">
-                  <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] ${
-                    entry.rank === 1 ? 'bg-amber-500 text-slate-950 font-black' :
-                    entry.rank === 2 ? 'bg-slate-300 text-slate-950 font-black' :
-                    entry.rank === 3 ? 'bg-amber-700 text-white font-black' : 'bg-slate-800 text-slate-400'
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-[11px] ${
+                    entry.rank === 1 ? 'bg-[#D97706] text-white' :
+                    entry.rank === 2 ? 'bg-[#244A73] text-white' :
+                    entry.rank === 3 ? 'bg-[#2D6A4F] text-white' : 'bg-[#EFE9DC] text-[#252525]'
                   }`}>
                     {entry.rank}
                   </span>
-                  <span className="font-bold text-slate-200">{entry.displayName}</span>
-                  <span className="bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold px-2 py-0.5 rounded">
-                    ⭐ Level {entry.level}
+                  <span className="font-bold text-[#252525]">{entry.displayName}</span>
+                  <span className="bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF] text-[10px] font-bold px-2 py-0.5 rounded">
+                    Level {entry.level}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <span className="text-amber-400 font-bold">{entry.xp} XP</span>
-                  <span className="text-amber-500 font-bold">🔥 {entry.streak}d</span>
+                  <span className="text-[#D97706] font-bold">{entry.xp} XP</span>
+                  <span className="text-[#D97706] font-bold">🔥 {entry.streak}d</span>
                 </div>
               </div>
             ))}
@@ -402,28 +402,28 @@ export const StudentDashboard = ({ onNavigate, token, user, onOpenProfile, onLog
       {/* ACHIEVEMENTS TAB */}
       {activeTab === 'ACHIEVEMENTS' && (
         <div className="space-y-4 max-w-4xl mx-auto">
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <Award className="w-4 h-4 text-amber-400" /> All Badges & Learning Achievements
+          <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+            <Award className="w-4 h-4 text-[#D97706]" /> All Badges & Learning Achievements
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {achievements.map(b => (
               <div key={b.code} className={`p-4 rounded-xl border flex items-center gap-3 ${
-                b.unlocked ? 'bg-amber-950/40 border-amber-500/60 text-amber-100' : 'bg-slate-950 border-slate-800 text-slate-500'
+                b.unlocked ? 'bg-[#FFF8E1] border-[#D97706]/60 text-[#252525]' : 'bg-[#FFFDF8] border-[#E2DACB] text-[#66635D]'
               }`}>
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                  b.unlocked ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'bg-slate-900 text-slate-700'
+                  b.unlocked ? 'bg-[#D97706] text-white' : 'bg-[#EFE9DC] text-[#66635D]'
                 }`}>
                   <Award className="w-6 h-6" />
                 </div>
 
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-slate-100">{b.title}</span>
-                    {b.unlocked && <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">UNLOCKED</span>}
+                    <span className="font-bold text-sm text-[#252525]">{b.title}</span>
+                    {b.unlocked && <span className="bg-[#E8F5E9] text-[#2D6A4F] border border-[#A5D6A7] text-[10px] font-bold px-2 py-0.5 rounded">UNLOCKED</span>}
                   </div>
-                  <p className="text-slate-400 text-xs mt-0.5">{b.description}</p>
-                  <span className="text-[10px] text-amber-400 font-bold mt-1 block">Reward: +{b.rewardXp} XP</span>
+                  <p className="text-[#66635D] text-xs mt-0.5">{b.description}</p>
+                  <span className="text-[10px] text-[#D97706] font-bold mt-1 block">Reward: +{b.rewardXp} XP</span>
                 </div>
               </div>
             ))}

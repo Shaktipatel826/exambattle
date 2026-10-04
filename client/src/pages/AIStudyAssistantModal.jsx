@@ -40,14 +40,14 @@ export const AIStudyAssistantModal = ({ token, isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed bottom-20 right-4 z-50 w-full max-w-sm glass-panel p-4 rounded-2xl border border-purple-500/50 shadow-2xl space-y-3 bg-slate-950">
+    <div className="fixed bottom-20 right-4 lg:bottom-20 lg:right-6 z-50 w-full max-w-sm bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] shadow-xl space-y-3 text-[#252525]">
       
-      <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+      <div className="flex justify-between items-center border-b border-[#E2DACB] pb-2">
         <div className="flex items-center space-x-2">
-          <Bot className="w-5 h-5 text-purple-400" />
-          <h3 className="text-xs font-bold text-white">AI Study Assistant</h3>
+          <Bot className="w-5 h-5 text-[#244A73]" />
+          <h3 className="text-xs font-bold text-[#244A73]">AI Study Assistant</h3>
         </div>
-        <button onClick={onClose} className="p-1 text-slate-400 hover:text-white">
+        <button onClick={onClose} className="p-1 text-[#66635D] hover:text-[#252525]">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -58,14 +58,14 @@ export const AIStudyAssistantModal = ({ token, isOpen, onClose }) => {
             key={i}
             className={`p-2.5 rounded-xl max-w-[85%] leading-relaxed ${
               m.sender === 'user'
-                ? 'bg-blue-600 text-white ml-auto font-medium'
-                : 'bg-slate-900 border border-slate-800 text-slate-200'
+                ? 'bg-[#244A73] text-white ml-auto font-medium'
+                : 'bg-[#F7F3EA] border border-[#E2DACB] text-[#252525]'
             }`}
           >
             {m.text}
           </div>
         ))}
-        {loading && <div className="text-[10px] text-purple-400 font-semibold animate-pulse">AI is writing explanation...</div>}
+        {loading && <div className="text-[10px] text-[#244A73] font-bold animate-pulse">AI is writing explanation...</div>}
       </div>
 
       <form onSubmit={handleSendMessage} className="flex gap-1.5 pt-1">
@@ -74,9 +74,9 @@ export const AIStudyAssistantModal = ({ token, isOpen, onClose }) => {
           placeholder="Ask e.g. Memory trick for fundamental rights..."
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          className="flex-1 glass-input text-xs py-1.5"
+          className="flex-1 bg-white border border-[#D5CDBF] text-[#252525] placeholder-[#8C867A] text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:border-[#244A73]"
         />
-        <button type="submit" className="p-2 rounded-lg bg-purple-600 text-white font-bold">
+        <button type="submit" className="p-2 rounded-lg bg-[#244A73] hover:bg-[#1B3857] text-white font-bold">
           <Send className="w-3.5 h-3.5" />
         </button>
       </form>

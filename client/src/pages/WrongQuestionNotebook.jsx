@@ -47,15 +47,15 @@ export const WrongQuestionNotebook = ({ token }) => {
   const currentDue = dueItems[revIndex];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 text-[#252525]">
       
       {/* Header */}
-      <div className="glass-panel p-6 rounded-2xl bg-gradient-to-r from-rose-950/40 via-slate-900 to-slate-900 border border-rose-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-white flex items-center gap-2">
-            <RefreshCw className="w-6 h-6 text-rose-400" /> WRONG QUESTION NOTEBOOK & SMART REVISION
+          <h1 className="text-2xl font-black text-[#244A73] flex items-center gap-2">
+            <RefreshCw className="w-6 h-6 text-[#9E2A2B]" /> WRONG QUESTION NOTEBOOK & REVISION
           </h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-[#66635D] mt-1">
             Automatically saves your exam mistakes. Uses spaced repetition algorithms (1, 3, 7, 14, 30 days) for guaranteed long-term retention.
           </p>
         </div>
@@ -63,22 +63,22 @@ export const WrongQuestionNotebook = ({ token }) => {
         {dueItems.length > 0 && !revisionActive && (
           <button
             onClick={() => setRevisionActive(true)}
-            className="py-2.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-600/30 transition-all flex items-center gap-2 self-start md:self-auto"
+            className="py-2.5 px-5 rounded-xl bg-[#9E2A2B] hover:bg-[#7E2223] text-white font-bold text-xs shadow-sm transition-all flex items-center gap-2 self-start md:self-auto"
           >
-            <span>START SMART REVISION ({dueItems.length} DUE)</span>
+            <span>START REVISION ({dueItems.length} DUE)</span>
           </button>
         )}
       </div>
 
       {/* Active Revision Runner Mode */}
       {revisionActive && currentDue ? (
-        <div className="max-w-3xl mx-auto glass-panel p-6 rounded-2xl border border-rose-500/40 space-y-4">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400">
+        <div className="max-w-3xl mx-auto bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm space-y-4">
+          <div className="flex justify-between items-center text-xs font-bold text-[#66635D]">
             <span>Revision Item {revIndex + 1} of {dueItems.length}</span>
-            <span className="text-rose-400">Spaced Repetition Active</span>
+            <span className="text-[#9E2A2B]">Spaced Repetition Active</span>
           </div>
 
-          <p className="text-sm font-bold text-slate-100 leading-relaxed">{currentDue.question}</p>
+          <p className="text-sm font-bold text-[#252525] leading-relaxed">{currentDue.question}</p>
 
           <div className="space-y-2">
             {currentDue.options?.map((opt, oIdx) => (
@@ -88,9 +88,9 @@ export const WrongQuestionNotebook = ({ token }) => {
                 className={`w-full text-left p-3 rounded-xl border text-xs font-semibold transition-all ${
                   revAnswers[revIndex] === oIdx
                     ? oIdx === currentDue.correctAnswer
-                      ? 'bg-emerald-950 border-emerald-500 text-emerald-200'
-                      : 'bg-red-950 border-red-500 text-red-200'
-                    : 'bg-slate-950 border-slate-800 text-slate-300'
+                      ? 'bg-[#E8F5E9] border-[#2D6A4F] text-[#2D6A4F] font-bold'
+                      : 'bg-[#FDF2F2] border-[#9E2A2B] text-[#9E2A2B] font-bold'
+                    : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
                 }`}
               >
                 <strong>{String.fromCharCode(65 + oIdx)}.</strong> {opt}
@@ -98,10 +98,10 @@ export const WrongQuestionNotebook = ({ token }) => {
             ))}
           </div>
 
-          <div className="flex justify-between items-center pt-3 border-t border-slate-800">
+          <div className="flex justify-between items-center pt-3 border-t border-[#E2DACB]">
             <button
               onClick={() => setRevisionActive(false)}
-              className="text-xs font-semibold text-slate-400 hover:text-white"
+              className="text-xs font-semibold text-[#66635D] hover:text-[#252525]"
             >
               Exit Revision
             </button>
@@ -109,14 +109,14 @@ export const WrongQuestionNotebook = ({ token }) => {
             {revIndex < dueItems.length - 1 ? (
               <button
                 onClick={() => setRevIndex(revIndex + 1)}
-                className="py-2 px-5 rounded-lg bg-rose-600 text-white font-bold text-xs"
+                className="py-2 px-5 rounded-lg bg-[#244A73] hover:bg-[#1B3857] text-white font-bold text-xs"
               >
                 Next Revision Question
               </button>
             ) : (
               <button
                 onClick={() => { setRevisionActive(false); fetchNotebook(); }}
-                className="py-2 px-5 rounded-lg bg-emerald-600 text-white font-bold text-xs"
+                className="py-2 px-5 rounded-lg bg-[#2D6A4F] text-white font-bold text-xs"
               >
                 Complete Revision Session
               </button>
@@ -127,31 +127,31 @@ export const WrongQuestionNotebook = ({ token }) => {
         /* Categorized Subject Notebook Display */
         <div className="space-y-6">
           {Object.keys(categorized).length === 0 ? (
-            <div className="glass-panel p-12 text-center rounded-2xl text-slate-400">
-              <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-400 mb-2" />
-              <h3 className="text-base font-bold text-slate-200">No Mistake Logged Yet!</h3>
-              <p className="text-xs text-slate-500 mt-1">
+            <div className="bg-[#FFFDF8] p-12 text-center rounded-2xl border border-[#E2DACB] text-[#66635D]">
+              <CheckCircle2 className="w-12 h-12 mx-auto text-[#2D6A4F] mb-2" />
+              <h3 className="text-base font-bold text-[#252525]">No Mistake Logged Yet!</h3>
+              <p className="text-xs text-[#66635D] mt-1">
                 Any questions you answer incorrectly during solo practice or battles will appear here automatically.
               </p>
             </div>
           ) : (
             Object.keys(categorized).map(subjectName => (
-              <div key={subjectName} className="glass-panel p-5 rounded-xl border border-slate-700/80 space-y-3">
-                <h3 className="text-sm font-bold text-white flex items-center justify-between border-b border-slate-800 pb-2">
+              <div key={subjectName} className="bg-[#FFFDF8] p-5 rounded-xl border border-[#E2DACB] shadow-sm space-y-3">
+                <h3 className="text-sm font-bold text-[#252525] flex items-center justify-between border-b border-[#E2DACB] pb-2">
                   <span>{subjectName} Mistakes</span>
-                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800">
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-[#FDF2F2] text-[#9E2A2B] border border-[#F87171]">
                     {categorized[subjectName].length} Items Saved
                   </span>
                 </h3>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {categorized[subjectName].map(item => (
-                    <div key={item.mistakeId} className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <p className="text-xs font-bold text-slate-200">{item.question?.question}</p>
-                      <div className="flex justify-between items-center text-[10px] text-slate-400">
-                        <span className="text-red-400 font-semibold">Wrong Attempts: {item.wrongCount}</span>
-                        <span className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3 text-slate-500" />
+                    <div key={item.mistakeId} className="p-3.5 bg-[#F7F3EA] rounded-xl border border-[#E2DACB] space-y-2">
+                      <p className="text-xs font-bold text-[#252525]">{item.question?.question}</p>
+                      <div className="flex justify-between items-center text-[10px] text-[#66635D]">
+                        <span className="text-[#9E2A2B] font-bold">Wrong Attempts: {item.wrongCount}</span>
+                        <span className="flex items-center gap-1 font-semibold">
+                          <Calendar className="w-3 h-3 text-[#66635D]" />
                           Next Rev: {new Date(item.nextRevisionDate).toLocaleDateString()}
                         </span>
                       </div>
