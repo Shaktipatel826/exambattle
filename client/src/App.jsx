@@ -141,7 +141,7 @@ const AppContent = () => {
 
         {/* Admin Section */}
         {activeTab.startsWith('ADMIN') && (
-          <AdminDashboard token={token} />
+          <AdminDashboard token={token} activeTab={activeTab} setActiveTab={setActiveTab} />
         )}
       </main>
 
