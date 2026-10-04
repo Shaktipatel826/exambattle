@@ -1,6 +1,6 @@
 import { executeGeminiPrompt } from './geminiProvider.js';
-import { buildOneLinersPrompt, buildStudyNotesPrompt, buildMcqPrompt } from './promptBuilder.js';
-import { parseCleanJSON, validateMCQSchema, validateOneLinerSchema } from './contentParser.js';
+import { buildMcqPrompt } from './promptBuilder.js';
+import { parseCleanJSON, validateMCQSchema } from './contentParser.js';
 import { Question } from '../../models/Question.js';
 import { AIJob } from '../../models/AIJob.js';
 
@@ -34,17 +34,28 @@ export const splitTextIntoLogicalChunks = (text, targetChunkChars = 3500) => {
 };
 
 /**
- * Process AI Job sequentially/in safe batches with metadata updates and duplicate checking
+ * Helper to normalize question statements for strict duplicate detection
+ */
+const normalizeQuestionText = (text = '') => {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+/**
+ * Process AI Job: Extract MAXIMUM source-grounded MCQs across ALL chunks without artificial caps.
+ * Strictly NO Study Notes, NO One-Liners, NO Summaries, NO Flashcards for Admin AI Question Generator.
  */
 export const processAIContentJob = async ({
   jobId,
   extractedText,
-  generationType = 'ALL',
   subject = 'General Studies',
   topic = 'General',
   exam = 'General',
   difficulty = 'Medium',
-  mcqCount = 5,
+  mcqCount = 10,
   createdBy = 'Admin'
 }) => {
   const job = await AIJob.findOne({ jobId });
@@ -54,108 +65,62 @@ export const processAIContentJob = async ({
     job.status = 'PROCESSING';
     job.totalChars = extractedText.length;
     
+    // Split complete document into 3500-char logical chunks
     const chunks = splitTextIntoLogicalChunks(extractedText, 3500);
     job.totalChunks = chunks.length;
     await job.save();
 
-    let accumulatedOneLiners = [];
-    let accumulatedStudyNotes = null;
     let accumulatedMcqs = [];
     let completedChunks = 0;
     let failedChunks = 0;
+    let duplicateCount = 0;
+    let invalidCount = 0;
 
+    // Track normalized questions seen in this batch to prevent internal duplicates
+    const seenInBatch = new Set();
+
+    // Process ALL chunks (Chunk 1 to Chunk N) without stopping
     for (let i = 0; i < chunks.length; i++) {
       const chunkText = chunks[i];
+      console.log(`[AI Job ${jobId}] Processing Chunk ${i + 1}/${chunks.length} (${chunkText.length} chars)...`);
 
-      // 1. One-Liners
-      if (generationType === 'ONE_LINERS' || generationType === 'ALL') {
-        try {
-          const prompt = buildOneLinersPrompt(chunkText, subject, topic);
-          const rawOutput = await executeGeminiPrompt(prompt);
-          const parsed = parseCleanJSON(rawOutput);
-          if (parsed && Array.isArray(parsed.oneLiners)) {
-            parsed.oneLiners.forEach(item => {
-              const val = validateOneLinerSchema(item, topic);
-              if (val) accumulatedOneLiners.push(val);
-            });
-          }
-        } catch (err) {
-          console.warn(`[AI Job ${jobId}] Chunk ${i + 1} Gemini One-Liners fallback: ${err.message}`);
-          const fallbackLines = chunkText.split(/\r?\n/).filter(line => line.trim().length > 15).slice(0, 4);
-          fallbackLines.forEach(line => {
-            const val = validateOneLinerSchema({ text: line.trim(), topic, importance: 'high' }, topic);
-            if (val) accumulatedOneLiners.push(val);
-          });
-        }
-      }
+      try {
+        // Prompt Gemini to extract maximum source-grounded MCQs from this chunk
+        const targetPerChunk = Math.max(5, Math.ceil(mcqCount / chunks.length));
+        const prompt = buildMcqPrompt(chunkText, subject, topic, exam, difficulty, targetPerChunk);
+        const rawOutput = await executeGeminiPrompt(prompt);
+        const parsed = parseCleanJSON(rawOutput);
 
-      // 2. Study Notes
-      if (generationType === 'STUDY_NOTES' || generationType === 'ALL') {
-        try {
-          const prompt = buildStudyNotesPrompt(chunkText, subject, topic);
-          const rawOutput = await executeGeminiPrompt(prompt);
-          const parsed = parseCleanJSON(rawOutput);
-          if (parsed && parsed.studyNotes) {
-            accumulatedStudyNotes = parsed.studyNotes;
-          }
-        } catch (err) {
-          console.warn(`[AI Job ${jobId}] Chunk ${i + 1} Gemini Study Notes fallback: ${err.message}`);
-          accumulatedStudyNotes = {
-            title: `${subject} - ${topic} Summary Notes`,
-            overview: `Extracted study notes for ${topic} in ${subject}.`,
-            sections: [{ title: 'Overview Section', content: chunkText.substring(0, 400) }],
-            keyConcepts: [{ concept: topic, explanation: 'Key concept derived from study content.' }],
-            importantFacts: [chunkText.substring(0, 150)],
-            revisionPoints: [`Practice PYQs for ${topic}.`]
-          };
-        }
-      }
-
-      // 3. MCQs / Practice Test
-      if (generationType === 'MCQS' || generationType === 'PRACTICE_TEST' || generationType === 'ALL') {
-        try {
-          const countForChunk = Math.max(2, Math.ceil(mcqCount / chunks.length));
-          const prompt = buildMcqPrompt(chunkText, subject, topic, exam, difficulty, countForChunk);
-          const rawOutput = await executeGeminiPrompt(prompt);
-          const parsed = parseCleanJSON(rawOutput);
-
-          if (parsed && Array.isArray(parsed.mcqs)) {
-            for (const rawQ of parsed.mcqs) {
-              const valQ = validateMCQSchema(rawQ, subject, topic);
-              if (valQ) {
-                const normText = valQ.question.toLowerCase().replace(/[^\w\s]/gi, '').trim();
-                const existing = await Question.findOne({ question: valQ.question.trim() });
-                valQ.duplicateFlag = !!existing;
-                accumulatedMcqs.push(valQ);
-              }
+        if (parsed && Array.isArray(parsed.mcqs)) {
+          for (const rawQ of parsed.mcqs) {
+            const valQ = validateMCQSchema(rawQ, subject, topic);
+            if (!valQ) {
+              invalidCount++;
+              continue;
             }
-          }
-        } catch (err) {
-          console.warn(`[AI Job ${jobId}] Chunk ${i + 1} Gemini MCQs fallback: ${err.message}`);
-          // Fallback MCQ generation strictly from chunk text
-          const firstSentence = chunkText.split(/(?<=[.!?])\s+/)[0] || 'Which provision is associated with this topic?';
-          const fallbackQ = validateMCQSchema({
-            question: `Which key provision accurately describes: "${firstSentence.substring(0, 70)}..."?`,
-            options: [
-              `Primary rule governing ${topic}`,
-              `Secondary unrelated rule`,
-              `Outdated administrative rule`,
-              `None of the above`
-            ],
-            correct_answer: 0,
-            explanation: `Option A accurately reflects the study content provision for ${topic}.`,
-            subject,
-            topic,
-            difficulty,
-            source_reference: `Chunk ${i + 1}`
-          }, subject, topic);
 
-          if (fallbackQ) {
-            const existing = await Question.findOne({ question: fallbackQ.question.trim() });
-            fallbackQ.duplicateFlag = !!existing;
-            accumulatedMcqs.push(fallbackQ);
+            const normKey = normalizeQuestionText(valQ.question);
+            
+            // Check internal duplicate within current job batch
+            if (seenInBatch.has(normKey)) {
+              duplicateCount++;
+              continue; // Skip exact duplicate inside same batch
+            }
+            seenInBatch.add(normKey);
+
+            // Check duplicate in MongoDB Question Bank
+            const existingInDb = await Question.findOne({ question: valQ.question.trim() });
+            valQ.duplicateFlag = !!existingInDb;
+            valQ.sourceReference = `Chunk ${i + 1} (${valQ.sourceReference || 'Source Material'})`;
+
+            accumulatedMcqs.push(valQ);
           }
+        } else {
+          invalidCount++;
         }
+      } catch (chunkErr) {
+        failedChunks++;
+        console.warn(`[AI Job ${jobId}] Chunk ${i + 1} failed: ${chunkErr.message}. Continuing with remaining chunks.`);
       }
 
       completedChunks++;
@@ -163,29 +128,29 @@ export const processAIContentJob = async ({
       await job.save();
     }
 
-    // Save generated MCQs to Pending Review Queue (NEVER auto-publish!)
+    // Save ALL valid unique generated MCQs into MongoDB Question Collection
     const savedPendingMCQs = [];
-    let duplicateCount = 0;
 
     for (const q of accumulatedMcqs) {
       if (q.duplicateFlag) duplicateCount++;
+
       const newQ = await Question.create({
         question: q.question,
         options: q.options,
         correctAnswer: q.correctAnswer,
-        explanation: q.explanation,
+        explanation: q.explanation || '',
         subject: q.subject || subject,
         topic: q.topic || topic,
         exam: exam || 'General',
         difficulty: q.difficulty || difficulty,
-        source: job.sourceDocumentName,
+        source: job.sourceDocumentName || 'Source Document',
         sourceType: 'AI_GENERATED',
-        sourceReference: q.sourceReference,
-        tags: q.tags,
-        duplicateFlag: q.duplicateFlag,
+        sourceReference: q.sourceReference || 'AI Generator',
+        tags: q.tags || [subject.toLowerCase(), topic.toLowerCase()],
+        duplicateFlag: q.duplicateFlag || false,
         verified: false,
-        status: 'PENDING_REVIEW', // QUEUED FOR ADMIN REVIEW
-        createdBy: createdBy
+        status: 'PENDING_REVIEW', // Default: Queued for Admin Review
+        createdBy: createdBy || 'Admin AI Generator'
       });
 
       savedPendingMCQs.push({
@@ -199,21 +164,23 @@ export const processAIContentJob = async ({
         difficulty: newQ.difficulty,
         sourceReference: newQ.sourceReference,
         duplicateFlag: newQ.duplicateFlag,
-        status: 'PENDING_REVIEW'
+        status: newQ.status
       });
     }
 
+    // Save complete Job summary in DB
     job.status = 'COMPLETED';
-    job.oneLiners = accumulatedOneLiners;
-    job.studyNotes = accumulatedStudyNotes || { title: `${subject} - ${topic}`, overview: 'Generated content notes' };
+    job.oneLiners = [];
+    job.studyNotes = null;
     job.generatedMcqs = savedPendingMCQs;
-    job.generatedOneLinersCount = accumulatedOneLiners.length;
-    job.generatedNotesCount = accumulatedStudyNotes ? 1 : 0;
+    job.generatedOneLinersCount = 0;
+    job.generatedNotesCount = 0;
     job.generatedMcqCount = savedPendingMCQs.length;
     job.duplicateCount = duplicateCount;
     job.pendingReviewCount = savedPendingMCQs.length;
     await job.save();
 
+    console.log(`[AI Job ${jobId}] SUCCESS: Generated & Saved ${savedPendingMCQs.length} MCQs across ${completedChunks} chunks.`);
     return job;
   } catch (err) {
     job.status = 'FAILED';

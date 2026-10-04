@@ -4,7 +4,7 @@ import {
   RotateCcw, Award, CheckSquare, FileText, AlertCircle, ChevronRight
 } from 'lucide-react';
 
-export const SoloPracticePage = ({ token, onComplete }) => {
+export const SoloPracticePage = ({ token, onComplete, initialConfig, autoStart }) => {
   // Mode: 'CONFIG' | 'TEST' | 'RESULT'
   const [mode, setMode] = useState('CONFIG');
   
@@ -25,7 +25,8 @@ export const SoloPracticePage = ({ token, onComplete }) => {
     questionCount: 10,
     timeLimitMinutes: 10,
     negativeMarking: 0.25,
-    mode: 'SOLO'
+    mode: 'SOLO',
+    ...initialConfig
   });
 
   // Active Test State
@@ -43,7 +44,14 @@ export const SoloPracticePage = ({ token, onComplete }) => {
 
   useEffect(() => {
     fetchConfigOptions();
-  }, []);
+    if (initialConfig) {
+      const activeConf = { ...config, ...initialConfig };
+      setConfig(activeConf);
+      if (autoStart) {
+        handleStartTest(null, activeConf);
+      }
+    }
+  }, [initialConfig]);
 
   // Timer Countdown Effect
   useEffect(() => {
@@ -82,9 +90,10 @@ export const SoloPracticePage = ({ token, onComplete }) => {
     }
   };
 
-  const handleStartTest = async (e) => {
+  const handleStartTest = async (e, customConfig) => {
     if (e) e.preventDefault();
     setLoading(true);
+    const targetConfig = customConfig || config;
     try {
       const res = await fetch('/api/tests/create', {
         method: 'POST',
@@ -92,7 +101,7 @@ export const SoloPracticePage = ({ token, onComplete }) => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify(config)
+        body: JSON.stringify(targetConfig)
       });
       const data = await res.json();
       if (data.success && data.test) {

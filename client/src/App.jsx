@@ -18,7 +18,12 @@ import { Bot } from 'lucide-react';
 const AppContent = () => {
   const { user, token, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('HOME');
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [customTestConfig, setCustomTestConfig] = useState(null);
+
+  const handleLaunchAdminTest = (testConfig) => {
+    setCustomTestConfig(testConfig);
+    setActiveTab('PRACTICE');
+  };
   const [assistantOpen, setAssistantOpen] = useState(false);
 
   // Automatically route ADMIN user to Admin Dashboard on login
@@ -102,7 +107,12 @@ const AppContent = () => {
         {activeTab === 'PRACTICE' && (
           <SoloPracticePage
             token={token}
-            onComplete={() => setActiveTab('HOME')}
+            initialConfig={customTestConfig}
+            autoStart={!!customTestConfig}
+            onComplete={() => {
+              setCustomTestConfig(null);
+              setActiveTab('HOME');
+            }}
           />
         )}
 
@@ -141,7 +151,13 @@ const AppContent = () => {
 
         {/* Admin Section */}
         {activeTab.startsWith('ADMIN') && (
-          <AdminDashboard token={token} activeTab={activeTab} setActiveTab={setActiveTab} />
+          <AdminDashboard
+            token={token}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            onTakeTest={handleLaunchAdminTest}
+            onChallengeFriend={() => setActiveTab('BATTLE')}
+          />
         )}
       </main>
 

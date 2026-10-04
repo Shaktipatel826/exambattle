@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Shield, UploadCloud, Cpu, AlertTriangle, BookOpen, Users, CheckCircle2, XCircle, Plus, Search, Filter, Edit3, Trash2, History, Copy, Layers, FileText, RefreshCw, Check, Sparkles
+  Shield, UploadCloud, Cpu, AlertTriangle, BookOpen, Users, CheckCircle2, XCircle, Plus, Search, Filter, Edit3, Trash2, History, Copy, Layers, FileText, RefreshCw, Check, Sparkles, Play, Share2
 } from 'lucide-react';
 import { ContentManagementTab } from '../components/ContentManagementTab';
 
-export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
+export const AdminDashboard = ({ token, activeTab, setActiveTab, onTakeTest, onChallengeFriend }) => {
   const [activeSubTab, setActiveSubTab] = useState('BANK'); // BANK | CONTENT | APPROVALS | MANUAL | IMPORT | AI_GEN | REPORTS | STATS
   const [stats, setStats] = useState(null);
   
@@ -55,21 +55,34 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
   // AI Generator Engine State
   const [aiForm, setAiForm] = useState({
     subject: 'Indian Polity',
-    topic: 'President & Vice President',
+    topic: 'President & Constitutional Articles',
     exam: 'SSC CGL',
     difficulty: 'Medium',
-    count: 5,
-    generationType: 'ALL',
+    count: 10,
     pastedText: ''
   });
   const [importFile, setImportFile] = useState(null);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [aiJobResult, setAiJobResult] = useState(null);
+  const [chunkProgress, setChunkProgress] = useState('');
 
   // Bulk Import File State
   const [bulkImportFile, setBulkImportFile] = useState(null);
   const [importSummary, setImportSummary] = useState(null);
   const [autoPublishImport, setAutoPublishImport] = useState(false);
+
+  // Mock Test Creator State
+  const [showMockTestModal, setShowMockTestModal] = useState(false);
+  const [mockTestForm, setMockTestForm] = useState({
+    title: 'Indian Polity Master Mock Test',
+    exam: 'SSC CGL',
+    subject: 'Indian Polity',
+    topic: 'All',
+    questionCount: 15,
+    durationMinutes: 15,
+    difficulty: 'Medium',
+    negativeMarking: 0.25
+  });
 
   // Sync activeTab prop from App.jsx header navigation
   useEffect(() => {
@@ -315,21 +328,21 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
   const handleAIGenerateJobSubmit = async (e) => {
     e.preventDefault();
     if (!importFile && (!aiForm.pastedText || !aiForm.pastedText.trim())) {
-      return alert('Please select a PDF/TXT/DOCX file OR paste study material / lecture transcript text.');
+      return alert('Please select a PDF/TXT/DOCX/CSV file OR paste study material / lecture transcript text.');
     }
 
     setIsGeneratingAI(true);
     setAiJobResult(null);
+    setChunkProgress('Extracting source text & calculating document chunks...');
 
     const formData = new FormData();
     if (importFile) formData.append('file', importFile);
     if (aiForm.pastedText) formData.append('pastedText', aiForm.pastedText);
-    formData.append('generationType', aiForm.generationType || 'ALL');
     formData.append('subject', aiForm.subject || 'General Studies');
     formData.append('topic', aiForm.topic || 'General');
     formData.append('exam', aiForm.exam || 'SSC CGL');
     formData.append('difficulty', aiForm.difficulty || 'Medium');
-    formData.append('mcqCount', aiForm.count || 5);
+    formData.append('mcqCount', aiForm.count || 10);
 
     try {
       const res = await fetch('/api/ai/admin-generate-job', {
@@ -349,6 +362,7 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
       alert('AI Job execution error: ' + err.message);
     } finally {
       setIsGeneratingAI(false);
+      setChunkProgress('');
     }
   };
 
@@ -380,6 +394,21 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
     }
   };
 
+  const handleStartAdminMockTest = () => {
+    if (onTakeTest) {
+      onTakeTest({
+        mode: 'MOCK',
+        subject: mockTestForm.subject,
+        topic: mockTestForm.topic,
+        exam: mockTestForm.exam,
+        difficulty: mockTestForm.difficulty,
+        questionCount: mockTestForm.questionCount,
+        timeLimitMinutes: mockTestForm.durationMinutes,
+        negativeMarking: mockTestForm.negativeMarking
+      });
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
       
@@ -395,10 +424,14 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <span className="px-3 py-1 bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF] rounded-lg text-xs font-bold">
-            Authenticated Admin
-          </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowMockTestModal(true)}
+            className="px-3.5 py-2 bg-[#2D6A4F] hover:bg-[#1B4332] text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1.5"
+          >
+            <Play className="w-4 h-4 fill-white" />
+            <span>Create / Take Mock Test</span>
+          </button>
         </div>
       </div>
 
@@ -864,10 +897,10 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
           <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm space-y-4 max-w-3xl">
             <div className="flex items-center justify-between border-b border-[#E2DACB] pb-3">
               <h2 className="text-sm font-extrabold text-[#252525] flex items-center gap-2">
-                <Cpu className="w-5 h-5 text-[#244A73]" /> Gemini AI Study & Question Generation Engine
+                <Cpu className="w-5 h-5 text-[#244A73]" /> Gemini AI High-Yield MCQ Extraction Engine
               </h2>
               <span className="bg-[#EFE9DC] text-[#244A73] px-2.5 py-0.5 rounded text-[10px] font-bold border border-[#D5CDBF]">
-                gemini-3.8-flash
+                gemini-3.8-flash (Chunked Pipeline)
               </span>
             </div>
 
@@ -888,26 +921,12 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
                   rows="4"
                   value={aiForm.pastedText || ''}
                   onChange={e => setAiForm({ ...aiForm, pastedText: e.target.value })}
-                  placeholder="Paste lecture notes, study chapter text, or video transcript..."
+                  placeholder="Paste long lecture transcript, notes, or chapter text here..."
                   className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl p-3 text-[#252525]"
                 ></textarea>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[#252525] mb-1 font-bold">Generation Output Type</label>
-                  <select
-                    value={aiForm.generationType || 'ALL'}
-                    onChange={e => setAiForm({ ...aiForm, generationType: e.target.value })}
-                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
-                  >
-                    <option value="ALL">All (MCQs + One-Liners + Study Notes)</option>
-                    <option value="MCQS">MCQs Only</option>
-                    <option value="ONE_LINERS">One-Liner Notes Only</option>
-                    <option value="STUDY_NOTES">Detailed Study Notes Only</option>
-                  </select>
-                </div>
-
                 <div>
                   <label className="block text-[#252525] mb-1 font-bold">Target Exam</label>
                   <select
@@ -915,11 +934,24 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
                     onChange={e => setAiForm({ ...aiForm, exam: e.target.value })}
                     className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
                   >
-                    <option value="SSC CGL">SSC CGL / CHSL</option>
+                    <option value="SSC CGL">SSC CGL / CHSL / MTS</option>
                     <option value="RRB NTPC">RRB NTPC / Railway ALP</option>
                     <option value="SBI PO">Banking (SBI PO / IBPS)</option>
                     <option value="UP Police">UP Police / UPSI / Lekhpal</option>
                     <option value="General State Exam">General State Exams</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[#252525] mb-1 font-bold">Difficulty Level</label>
+                  <select
+                    value={aiForm.difficulty || 'Medium'}
+                    onChange={e => setAiForm({ ...aiForm, difficulty: e.target.value })}
+                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                  >
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
                   </select>
                 </div>
               </div>
@@ -944,11 +976,11 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[#252525] mb-1 font-bold">MCQ Count per Chunk</label>
+                  <label className="block text-[#252525] mb-1 font-bold">Target MCQ Recommendation</label>
                   <input
                     type="number"
-                    min={1}
-                    max={30}
+                    min={5}
+                    max={150}
                     value={aiForm.count}
                     onChange={e => setAiForm({ ...aiForm, count: Number(e.target.value) })}
                     className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
@@ -964,65 +996,102 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
                 {isGeneratingAI ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
-                    <span>Gemini AI Analyzing Source Content & Generating Questions...</span>
+                    <span>{chunkProgress || 'Gemini AI Extracting Maximum MCQs Across All Chunks...'}</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>RUN GEMINI CHUNKING & QUESTION GENERATION PIPELINE</span>
+                    <span>GENERATE MAXIMUM SOURCE-GROUNDED MCQs</span>
                   </>
                 )}
               </button>
             </form>
           </div>
 
-          {/* AI Generation Output Preview Section */}
+          {/* AI Generation Output Preview & Summary Section */}
           {aiJobResult && (
             <div className="space-y-6">
               
               {/* Job Summary Banner */}
-              <div className="bg-[#FFFDF8] p-5 rounded-2xl border border-[#E2DACB] shadow-sm space-y-2">
+              <div className="bg-[#FFFDF8] p-5 rounded-2xl border border-[#E2DACB] shadow-sm space-y-3">
                 <div className="flex items-center justify-between border-b border-[#E2DACB] pb-2">
                   <h3 className="font-extrabold text-sm text-[#244A73] flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-[#2D6A4F]" /> AI Job Completed & Queued for Pending Review
+                    <CheckCircle2 className="w-5 h-5 text-[#2D6A4F]" /> AI Job Complete — Questions Saved to MongoDB Question Bank
                   </h3>
                   <span className="text-[11px] font-mono text-[#66635D] font-bold">Job ID: {aiJobResult.jobId}</span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center pt-2">
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center pt-2">
                   <div className="p-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB]">
-                    <span className="block text-[10px] text-[#66635D] font-bold">MCQs GENERATED</span>
-                    <span className="text-lg font-black text-[#244A73]">{aiJobResult.generatedMcqCount || 0}</span>
+                    <span className="block text-[10px] text-[#66635D] font-bold">SOURCE CHARS</span>
+                    <span className="text-base font-black text-[#252525]">{aiJobResult.totalChars || 0}</span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB]">
-                    <span className="block text-[10px] text-[#66635D] font-bold">ONE-LINERS</span>
-                    <span className="text-lg font-black text-[#2D6A4F]">{aiJobResult.generatedOneLinersCount || 0}</span>
+                    <span className="block text-[10px] text-[#66635D] font-bold">CHUNKS PROCESSED</span>
+                    <span className="text-base font-black text-[#244A73]">{aiJobResult.completedChunks || 0} / {aiJobResult.totalChunks || 1}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB]">
+                    <span className="block text-[10px] text-[#66635D] font-bold">MCQs GENERATED</span>
+                    <span className="text-base font-black text-[#2D6A4F]">{aiJobResult.generatedMcqCount || 0}</span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB]">
                     <span className="block text-[10px] text-[#66635D] font-bold">DUPLICATES FLAGGED</span>
-                    <span className="text-lg font-black text-[#B45309]">{aiJobResult.duplicateCount || 0}</span>
+                    <span className="text-base font-black text-[#B45309]">{aiJobResult.duplicateCount || 0}</span>
                   </div>
-                  <div className="p-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB]">
-                    <span className="block text-[10px] text-[#66635D] font-bold">REVIEW STATUS</span>
-                    <span className="text-xs font-black text-[#B45309] block mt-1">PENDING_REVIEW</span>
+                  <div className="p-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] col-span-2 sm:col-span-1">
+                    <span className="block text-[10px] text-[#66635D] font-bold">STATUS</span>
+                    <span className="text-xs font-black text-[#B45309] block mt-0.5">PENDING_REVIEW</span>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-[#E2DACB]">
+                  <button
+                    onClick={() => {
+                      setMockTestForm({
+                        title: `${aiForm.subject} - ${aiForm.topic} AI Mock Test`,
+                        exam: aiForm.exam,
+                        subject: aiForm.subject,
+                        topic: aiForm.topic,
+                        questionCount: Math.min(aiJobResult.generatedMcqCount || 10, 30),
+                        durationMinutes: 15,
+                        difficulty: aiForm.difficulty,
+                        negativeMarking: 0.25
+                      });
+                      setShowMockTestModal(true);
+                    }}
+                    className="px-4 py-2 bg-[#2D6A4F] hover:bg-[#1B4332] text-white rounded-xl font-bold text-xs shadow-sm flex items-center space-x-1.5"
+                  >
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>Create Mock Test From These Questions</span>
+                  </button>
+
+                  {onChallengeFriend && (
+                    <button
+                      onClick={onChallengeFriend}
+                      className="px-4 py-2 bg-[#244A73] hover:bg-[#1B3857] text-white rounded-xl font-bold text-xs shadow-sm flex items-center space-x-1.5"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      <span>Challenge Friends in Battle Arena</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Generated MCQs Preview */}
+              {/* Generated MCQs List Preview */}
               {aiJobResult.generatedMcqs && aiJobResult.generatedMcqs.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="font-extrabold text-sm text-[#252525] flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-[#244A73]" /> Generated MCQs ({aiJobResult.generatedMcqs.length}) — Pending Admin Review
+                    <FileText className="w-4 h-4 text-[#244A73]" /> Generated MCQs ({aiJobResult.generatedMcqs.length}) — Queued in MongoDB Question Bank
                   </h3>
                   {aiJobResult.generatedMcqs.map((q, idx) => (
                     <div key={idx} className="bg-[#FFFDF8] p-5 rounded-2xl border border-[#E2DACB] shadow-sm space-y-3 text-xs">
-                      <div className="flex justify-between items-start">
+                      <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
                         <div className="space-y-1">
                           <span className="bg-[#FEF3C7] text-[#B45309] text-[10px] px-2.5 py-0.5 rounded font-bold border border-[#F59E0B]">PENDING_REVIEW</span>
                           <span className="ml-2 text-[#66635D] text-[10px] font-bold">{q.subject} • {q.topic}</span>
                           {q.duplicateFlag && (
                             <span className="ml-2 bg-[#FEF3C7] text-[#B45309] text-[10px] px-2 py-0.5 rounded font-bold border border-[#F59E0B]">
-                              Duplicate Match
+                              Duplicate Match Flagged
                             </span>
                           )}
                         </div>
@@ -1059,33 +1128,6 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
                       )}
                     </div>
                   ))}
-                </div>
-              )}
-
-              {/* Generated One-Liners Preview */}
-              {aiJobResult.oneLiners && aiJobResult.oneLiners.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="font-extrabold text-sm text-[#252525]">Generated One-Liner Facts ({aiJobResult.oneLiners.length})</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {aiJobResult.oneLiners.map((ol, idx) => (
-                      <div key={idx} className="bg-[#FFFDF8] p-4 rounded-xl border border-[#E2DACB] shadow-sm space-y-1">
-                        <span className="bg-[#EFE9DC] text-[#244A73] text-[10px] font-bold px-2 py-0.5 rounded border border-[#D5CDBF]">
-                          {ol.topic || 'Fact'}
-                        </span>
-                        <p className="font-extrabold text-[#252525] text-xs leading-relaxed">{ol.text || ol.question}</p>
-                        {ol.answer && <p className="text-[#2D6A4F] text-[11px] font-bold">Ans: {ol.answer}</p>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Generated Study Notes Preview */}
-              {aiJobResult.studyNotes && (
-                <div className="bg-[#FFFDF8] p-5 rounded-2xl border border-[#E2DACB] shadow-sm space-y-3">
-                  <h3 className="font-extrabold text-sm text-[#244A73]">Generated Concept Study Notes</h3>
-                  <p className="text-[#252525] text-xs font-bold">{aiJobResult.studyNotes.title || 'Study Summary'}</p>
-                  <p className="text-[#66635D] text-xs">{aiJobResult.studyNotes.overview || aiJobResult.studyNotes.summary}</p>
                 </div>
               )}
 
@@ -1326,6 +1368,119 @@ export const AdminDashboard = ({ token, activeTab, setActiveTab }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE MOCK TEST MODAL */}
+      {showMockTestModal && (
+        <div className="fixed inset-0 z-50 bg-[#252525]/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] max-w-lg w-full space-y-4 text-xs shadow-xl">
+            <div className="flex justify-between items-center border-b border-[#E2DACB] pb-3">
+              <h3 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+                <Play className="w-4 h-4 text-[#2D6A4F] fill-[#2D6A4F]" /> Create Mock Test Paper
+              </h3>
+              <button
+                onClick={() => setShowMockTestModal(false)}
+                className="text-[#66635D] hover:text-[#252525] font-bold text-base"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[#252525] mb-1 font-bold">Mock Test Title</label>
+                <input
+                  type="text"
+                  value={mockTestForm.title}
+                  onChange={e => setMockTestForm({ ...mockTestForm, title: e.target.value })}
+                  className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[#252525] mb-1 font-bold">Subject</label>
+                  <input
+                    type="text"
+                    value={mockTestForm.subject}
+                    onChange={e => setMockTestForm({ ...mockTestForm, subject: e.target.value })}
+                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#252525] mb-1 font-bold">Topic</label>
+                  <input
+                    type="text"
+                    value={mockTestForm.topic}
+                    onChange={e => setMockTestForm({ ...mockTestForm, topic: e.target.value })}
+                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[#252525] mb-1 font-bold">Question Count</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={mockTestForm.questionCount}
+                    onChange={e => setMockTestForm({ ...mockTestForm, questionCount: Number(e.target.value) })}
+                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#252525] mb-1 font-bold">Duration (Mins)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={180}
+                    value={mockTestForm.durationMinutes}
+                    onChange={e => setMockTestForm({ ...mockTestForm, durationMinutes: Number(e.target.value) })}
+                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#252525] mb-1 font-bold">Neg. Marking</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={mockTestForm.negativeMarking}
+                    onChange={e => setMockTestForm({ ...mockTestForm, negativeMarking: Number(e.target.value) })}
+                    className="w-full bg-[#F7F3EA] border border-[#E2DACB] rounded-xl px-3 py-2 text-[#252525]"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-[#E2DACB] flex flex-col sm:flex-row gap-2">
+                <button
+                  onClick={() => {
+                    setShowMockTestModal(false);
+                    handleStartAdminMockTest();
+                  }}
+                  className="flex-1 py-3 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-extrabold text-xs flex items-center justify-center space-x-1.5 shadow-sm"
+                >
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>TAKE MOCK TEST NOW</span>
+                </button>
+
+                {onChallengeFriend && (
+                  <button
+                    onClick={() => {
+                      setShowMockTestModal(false);
+                      onChallengeFriend();
+                    }}
+                    className="flex-1 py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-extrabold text-xs flex items-center justify-center space-x-1.5 shadow-sm"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>CHALLENGE FRIENDS</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
