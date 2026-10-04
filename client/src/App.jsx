@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigation } from './components/Navigation';
+import { PublicHomePage } from './pages/PublicHomePage';
 import { AuthPage } from './pages/AuthPage';
 import { StudentDashboard } from './pages/StudentDashboard';
 import { AIStudyLab } from './pages/AIStudyLab';
@@ -17,20 +18,40 @@ import { Bot } from 'lucide-react';
 
 const AppContent = () => {
   const { user, token, loading, logout } = useAuth();
+  
+  // Auth Flow state for unauthenticated visitors: PUBLIC_HOME | AUTH_FORM
+  const [authFlow, setAuthFlow] = useState({ view: 'PUBLIC_HOME', mode: 'login', role: 'STUDENT' });
+  
+  // Navigation active tab for authenticated users
   const [activeTab, setActiveTab] = useState('HOME');
   const [profileOpen, setProfileOpen] = useState(false);
   const [customTestConfig, setCustomTestConfig] = useState(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
 
   const handleLaunchAdminTest = (testConfig) => {
     setCustomTestConfig(testConfig);
     setActiveTab('PRACTICE');
   };
-  const [assistantOpen, setAssistantOpen] = useState(false);
 
-  // Automatically route ADMIN user to Admin Dashboard on login
+  const handleLogout = () => {
+    setProfileOpen(false);
+    logout();
+    setActiveTab('HOME');
+    setAuthFlow({ view: 'PUBLIC_HOME', mode: 'login', role: 'STUDENT' });
+  };
+
+  // Route user automatically based on authenticated role
   useEffect(() => {
-    if (user && user.role === 'ADMIN' && activeTab === 'HOME') {
-      setActiveTab('ADMIN_DASH');
+    if (user) {
+      if (user.role === 'ADMIN') {
+        if (!activeTab || !activeTab.startsWith('ADMIN')) {
+          setActiveTab('ADMIN_DASH');
+        }
+      } else {
+        if (activeTab && activeTab.startsWith('ADMIN')) {
+          setActiveTab('HOME');
+        }
+      }
     }
   }, [user]);
 
@@ -40,13 +61,15 @@ const AppContent = () => {
     const registerBackButton = async () => {
       try {
         const { App: CapApp } = await import('@capacitor/app');
-        handler = await CapApp.addListener('backButton', ({ canGoBack }) => {
+        handler = await CapApp.addListener('backButton', () => {
           if (profileOpen) {
             setProfileOpen(false);
           } else if (assistantOpen) {
             setAssistantOpen(false);
-          } else if (activeTab !== 'HOME') {
+          } else if (activeTab !== 'HOME' && user?.role !== 'ADMIN') {
             setActiveTab('HOME');
+          } else if (activeTab !== 'ADMIN_DASH' && user?.role === 'ADMIN') {
+            setActiveTab('ADMIN_DASH');
           } else {
             CapApp.minimizeApp();
           }
@@ -62,7 +85,7 @@ const AppContent = () => {
         handler.remove();
       }
     };
-  }, [activeTab, assistantOpen, profileOpen]);
+  }, [activeTab, assistantOpen, profileOpen, user]);
 
   if (loading) {
     return (
@@ -72,10 +95,26 @@ const AppContent = () => {
     );
   }
 
+  // Unauthenticated Flow: Public Home Page or Authentication Form
   if (!token || !user) {
-    return <AuthPage />;
+    if (authFlow.view === 'AUTH_FORM') {
+      return (
+        <AuthPage
+          initialMode={authFlow.mode}
+          initialRole={authFlow.role}
+          onBackToHome={() => setAuthFlow({ view: 'PUBLIC_HOME', mode: 'login', role: 'STUDENT' })}
+        />
+      );
+    }
+
+    return (
+      <PublicHomePage
+        onSelectMode={(mode, role) => setAuthFlow({ view: 'AUTH_FORM', mode, role })}
+      />
+    );
   }
 
+  // Authenticated Main View Router
   return (
     <div className="min-h-screen bg-[#F7F3EA] text-[#252525] flex flex-col selection:bg-[#244A73] selection:text-white pb-16 lg:pb-0">
       
@@ -84,7 +123,7 @@ const AppContent = () => {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         user={user}
-        onLogout={logout}
+        onLogout={handleLogout}
         profileOpen={profileOpen}
         setProfileOpen={setProfileOpen}
       />
@@ -97,7 +136,7 @@ const AppContent = () => {
             user={user}
             onNavigate={(tab) => setActiveTab(tab)}
             onOpenProfile={() => setProfileOpen(true)}
-            onLogout={logout}
+            onLogout={handleLogout}
           />
         )}
 
@@ -112,7 +151,7 @@ const AppContent = () => {
             autoStart={!!customTestConfig}
             onComplete={() => {
               setCustomTestConfig(null);
-              setActiveTab('HOME');
+              setActiveTab(user?.role === 'ADMIN' ? 'ADMIN_DASH' : 'HOME');
             }}
           />
         )}
@@ -150,8 +189,8 @@ const AppContent = () => {
           />
         )}
 
-        {/* Admin Section */}
-        {activeTab.startsWith('ADMIN') && (
+        {/* Admin Section (Protected for ADMIN role) */}
+        {activeTab.startsWith('ADMIN') && user?.role === 'ADMIN' && (
           <AdminDashboard
             token={token}
             activeTab={activeTab}

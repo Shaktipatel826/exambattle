@@ -11,12 +11,18 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
 
   const isAdmin = user && user.role === 'ADMIN';
 
-  const studentNavItems = [
+  const mobileNavItems = isAdmin ? [
+    { id: 'ADMIN_DASH', label: 'Dashboard', icon: Shield },
+    { id: 'ADMIN_QUESTIONS', label: 'Questions', icon: BookOpen },
+    { id: 'ADMIN_IMPORT', label: 'Import', icon: UploadCloud },
+    { id: 'ADMIN_AI_GEN', label: 'AI Gen', icon: Cpu },
+    { id: 'ADMIN_REPORTS', label: 'Reports', icon: AlertTriangle },
+    { id: 'PROFILE', label: 'Profile', icon: User, isProfile: true }
+  ] : [
     { id: 'HOME', label: 'Home', icon: Home },
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
     { id: 'AI_STUDY', label: 'AI Study', icon: Sparkles },
-    ...(isAdmin ? [{ id: 'ADMIN_DASH', label: 'Admin', icon: Shield }] : []),
     { id: 'PROFILE', label: 'Profile', icon: User, isProfile: true }
   ];
 
@@ -120,7 +126,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
 
         {/* Mobile Bottom Navigation Bar - includes single Profile tab */}
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#EFE9DC] border-t border-[#E2DACB] px-1 py-1.5 z-50 flex justify-around items-center shadow-lg">
-          {studentNavItems.map((item) => {
+          {mobileNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (

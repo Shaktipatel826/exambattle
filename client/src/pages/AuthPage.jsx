@@ -1,17 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Swords, Check, AlertCircle, Shield, UserCheck } from 'lucide-react';
+import { Swords, Check, AlertCircle, Shield, UserCheck, ArrowLeft } from 'lucide-react';
 
-export const AuthPage = () => {
+export const AuthPage = ({ initialMode = 'login', initialRole = 'STUDENT', onBackToHome }) => {
   const { login } = useAuth();
-  const [isLogin, setIsLogin] = useState(true);
-  const [role, setRole] = useState('STUDENT'); // STUDENT | ADMIN
+  const [isLogin, setIsLogin] = useState(initialMode === 'login');
+  const [role, setRole] = useState(initialRole); // STUDENT | ADMIN
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [targetExams, setTargetExams] = useState(['SSC CGL', 'UP Police']);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setIsLogin(initialMode === 'login');
+    setRole(initialRole);
+    if (initialMode === 'register') {
+      setRole('STUDENT'); // Public sign up is strictly STUDENT
+    }
+  }, [initialMode, initialRole]);
 
   const availableExams = [
     'SSC CGL', 'SSC CHSL', 'SSC MTS', 'SSC GD',
@@ -36,7 +44,7 @@ export const AuthPage = () => {
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const payload = isLogin 
       ? { email, password }
-      : { name, email, password, targetExams, role };
+      : { name, email, password, targetExams, role: 'STUDENT' };
 
     try {
       const res = await fetch(endpoint, {
@@ -61,6 +69,17 @@ export const AuthPage = () => {
     <div className="min-h-screen flex items-center justify-center p-4 bg-[#F7F3EA] text-[#252525] relative">
       <div className="w-full max-w-md bg-[#FFFDF8] rounded-2xl p-6 sm:p-8 relative z-10 border border-[#E2DACB] shadow-md">
         
+        {/* Back to Home Button */}
+        {onBackToHome && (
+          <button
+            onClick={onBackToHome}
+            className="mb-4 text-xs font-bold text-[#66635D] hover:text-[#244A73] flex items-center gap-1.5 transition-all"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Public Home</span>
+          </button>
+        )}
+
         {/* Header */}
         <div className="text-center mb-6">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-[#244A73] flex items-center justify-center shadow-sm mb-3">
@@ -68,7 +87,9 @@ export const AuthPage = () => {
           </div>
           <h1 className="text-2xl font-black tracking-tight text-[#244A73]">EXAMBATTLE</h1>
           <p className="text-xs text-[#66635D] mt-1 font-medium">
-            {isLogin ? 'Sign in to access your Competitive Exam Dashboard' : 'Create your aspirant account'}
+            {isLogin 
+              ? (role === 'ADMIN' ? 'Admin Portal Sign In' : 'Sign in to access your Student Dashboard')
+              : 'Create your aspirant student account'}
           </p>
         </div>
 
@@ -79,11 +100,11 @@ export const AuthPage = () => {
           </p>
           <div className="flex justify-between items-center text-[11px] text-[#66635D]">
             <span>Student: <code className="text-[#2D6A4F] font-bold">student@shakti.com</code> / <code>student123</code></span>
-            <button onClick={() => { setEmail('student@shakti.com'); setPassword('student123'); }} className="text-[#244A73] underline font-bold">Use</button>
+            <button type="button" onClick={() => { setEmail('student@shakti.com'); setPassword('student123'); setRole('STUDENT'); setIsLogin(true); }} className="text-[#244A73] underline font-bold">Use</button>
           </div>
           <div className="flex justify-between items-center text-[11px] text-[#66635D] mt-1">
-            <span>Admin: <code className="text-[#244A73] font-bold">admin@shakti.com</code> / <code>admin123</code></span>
-            <button onClick={() => { setEmail('admin@shakti.com'); setPassword('admin123'); }} className="text-[#244A73] underline font-bold">Use</button>
+            <span>Admin: <code className="text-[#8C6B1B] font-bold">admin@shakti.com</code> / <code>admin123</code></span>
+            <button type="button" onClick={() => { setEmail('admin@shakti.com'); setPassword('admin123'); setRole('ADMIN'); setIsLogin(true); }} className="text-[#8C6B1B] underline font-bold">Use</button>
           </div>
         </div>
 
@@ -111,29 +132,9 @@ export const AuthPage = () => {
 
               <div>
                 <label className="block text-xs font-bold text-[#252525] mb-1">Account Role</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRole('STUDENT')}
-                    className={`py-2 rounded-lg text-xs font-bold transition-all border ${
-                      role === 'STUDENT'
-                        ? 'bg-[#244A73] border-[#1B3857] text-white shadow-sm'
-                        : 'bg-[#EFE9DC] border-[#D5CDBF] text-[#66635D]'
-                    }`}
-                  >
-                    STUDENT
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRole('ADMIN')}
-                    className={`py-2 rounded-lg text-xs font-bold transition-all border ${
-                      role === 'ADMIN'
-                        ? 'bg-[#244A73] border-[#1B3857] text-white shadow-sm'
-                        : 'bg-[#EFE9DC] border-[#D5CDBF] text-[#66635D]'
-                    }`}
-                  >
-                    ADMIN
-                  </button>
+                <div className="p-2.5 rounded-lg bg-[#EFE9DC] border border-[#D5CDBF] text-xs font-bold text-[#244A73] flex items-center justify-between">
+                  <span>STUDENT (Competitive Exam Aspirant)</span>
+                  <span className="text-[10px] text-[#66635D] font-normal">Public Sign Up</span>
                 </div>
               </div>
 
