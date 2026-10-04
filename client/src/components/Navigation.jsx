@@ -16,6 +16,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
     { id: 'AI_STUDY', label: 'AI Study', icon: Sparkles },
+    ...(isAdmin ? [{ id: 'ADMIN_DASH', label: 'Admin', icon: Shield }] : []),
     { id: 'PROFILE', label: 'Profile', icon: User, isProfile: true }
   ];
 

@@ -21,6 +21,13 @@ const AppContent = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
 
+  // Automatically route ADMIN user to Admin Dashboard on login
+  useEffect(() => {
+    if (user && user.role === 'ADMIN' && activeTab === 'HOME') {
+      setActiveTab('ADMIN_DASH');
+    }
+  }, [user]);
+
   // Hardware Back Button listener for Android Capacitor APK
   useEffect(() => {
     let handler;
