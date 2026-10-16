@@ -1,73 +1,114 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { Swords, Users, Clock, Trophy, Play, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import {
+  Swords, Users, Clock, Trophy, Play, RotateCcw, AlertCircle, CheckCircle2,
+  ArrowRight, ArrowLeft, ChevronRight, Share2, Copy
+} from 'lucide-react';
 import { getSocketUrl } from '../lib/apiConfig';
+
+// ─── Exact subject names that match MongoDB ──────────────────────────────────
+const SUBJECTS = [
+  'Indian Polity',
+  'History',
+  'Geography',
+  'General Science',
+  'Indian Economy',
+  'Computer Awareness',
+  'Mathematics',
+  'Reasoning',
+  'Static GK',
+  'Uttar Pradesh GK',
+  'General Studies',
+];
 
 export const MultiplayerBattlePage = ({ token, user }) => {
   const [socket, setSocket] = useState(null);
   const [roomCodeInput, setRoomCodeInput] = useState('');
-  const [roomState, setRoomState] = useState(null); // Active room details
+  const [roomState, setRoomState] = useState(null);
   const [config, setConfig] = useState({
     subject: 'Indian Polity',
-    topic: 'Fundamental Rights',
-    questionCount: 5,
-    timeLimitMinutes: 3,
+    topic: 'All',
+    questionCount: 10,
+    timeLimitMinutes: 5,
     negativeMarking: 0.25,
-    difficulty: 'Medium'
+    difficulty: 'All',
   });
 
+  // In-battle state
   const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [selectedAnswers, setSelectedAnswers] = useState({});
+  const [selectedAnswers, setSelectedAnswers] = useState({});  // { questionIndex: optionIndex }
   const [leaderboard, setLeaderboard] = useState(null);
+  const [reviewQuestions, setReviewQuestions] = useState([]);
   const [error, setError] = useState('');
   const [timeLeft, setTimeLeft] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
+  // ── Socket Setup ────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Initialize Socket.io connection to backend server (Dynamic domain for web/Capacitor)
     const socketUrl = getSocketUrl();
-    const newSocket = io(socketUrl);
+    const newSocket = io(socketUrl, { transports: ['websocket', 'polling'] });
     setSocket(newSocket);
+
+    newSocket.on('connect_error', (err) => {
+      console.error('[Socket] Connect error:', err.message);
+    });
 
     newSocket.on('room_updated', (updatedRoom) => {
       setRoomState(updatedRoom);
     });
 
     newSocket.on('battle_started', ({ startTime, endTime, questions }) => {
-      setRoomState(prev => prev ? { ...prev, status: 'IN_PROGRESS', questions, startTime, endTime } : prev);
+      setRoomState(prev =>
+        prev ? { ...prev, status: 'IN_PROGRESS', questions, startTime, endTime } : prev
+      );
+      setCurrentQIndex(0);
+      setSelectedAnswers({});
       const remainingSecs = Math.floor((endTime - Date.now()) / 1000);
       setTimeLeft(Math.max(0, remainingSecs));
     });
 
     newSocket.on('battle_finished', ({ leaderboard, questions }) => {
       setLeaderboard(leaderboard);
+      if (questions) setReviewQuestions(questions);
       setRoomState(prev => prev ? { ...prev, status: 'FINISHED' } : prev);
     });
 
     return () => newSocket.disconnect();
   }, []);
 
-  // Shared server-authoritative countdown timer
+  // ── Server-Authoritative Countdown ─────────────────────────────────────────
   useEffect(() => {
-    if (roomState?.status === 'IN_PROGRESS' && roomState.endTime) {
-      const interval = setInterval(() => {
-        const remaining = Math.floor((roomState.endTime - Date.now()) / 1000);
-        if (remaining <= 0) {
-          setTimeLeft(0);
-          clearInterval(interval);
-        } else {
-          setTimeLeft(remaining);
-        }
-      }, 1000);
-      return () => clearInterval(interval);
-    }
+    if (roomState?.status !== 'IN_PROGRESS' || !roomState.endTime) return;
+
+    const interval = setInterval(() => {
+      const remaining = Math.floor((roomState.endTime - Date.now()) / 1000);
+      if (remaining <= 0) {
+        setTimeLeft(0);
+        clearInterval(interval);
+        // Auto-submit when time expires
+        if (!submitting) handleFinishBattle();
+      } else {
+        setTimeLeft(remaining);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, [roomState?.status, roomState?.endTime]);
 
+  const formatTimer = (totalSeconds) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  // ── Room Actions ────────────────────────────────────────────────────────────
   const handleCreateRoom = () => {
     if (!socket || !user) return;
+    setError('');
     socket.emit('create_room', { user, config }, (response) => {
       if (response.success) {
         setRoomState(response.room);
-        setError('');
       } else {
         setError(response.message || 'Failed to create room');
       }
@@ -76,10 +117,10 @@ export const MultiplayerBattlePage = ({ token, user }) => {
 
   const handleJoinRoom = () => {
     if (!socket || !user || !roomCodeInput.trim()) return;
+    setError('');
     socket.emit('join_room', { roomCode: roomCodeInput.toUpperCase().trim(), user }, (response) => {
       if (response.success) {
         setRoomState(response.room);
-        setError('');
       } else {
         setError(response.message || 'Room not found or full');
       }
@@ -91,318 +132,602 @@ export const MultiplayerBattlePage = ({ token, user }) => {
     socket.emit('start_battle', { roomCode: roomState.roomCode, userId: user.id || user._id });
   };
 
-  const handleAnswerSubmit = (optionIndex) => {
-    if (!socket || !roomState || selectedAnswers[currentQIndex] !== undefined) return;
-    
-    setSelectedAnswers({ ...selectedAnswers, [currentQIndex]: optionIndex });
-    
-    socket.emit('submit_answer', {
-      roomCode: roomState.roomCode,
-      userId: user.id || user._id,
-      questionIndex: currentQIndex,
-      selectedOptionIndex: optionIndex
-    });
+  const handleCopyCode = () => {
+    navigator.clipboard?.writeText(roomState?.roomCode || '');
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
+  // ── Answer Selection & Navigation ──────────────────────────────────────────
+  const handleSelectAnswer = (optionIndex) => {
+    // Allow changing answer before moving to next question
+    setSelectedAnswers(prev => ({ ...prev, [currentQIndex]: optionIndex }));
+
+    // Immediately emit to server (server records and allows re-submission with override)
+    if (socket && roomState) {
+      socket.emit('submit_answer', {
+        roomCode: roomState.roomCode,
+        userId: user.id || user._id,
+        questionIndex: currentQIndex,
+        selectedOptionIndex: optionIndex,
+      });
+    }
+  };
+
+  const handleNext = () => {
+    const questions = roomState?.questions || [];
+    if (currentQIndex < questions.length - 1) {
+      setCurrentQIndex(prev => prev + 1);
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentQIndex > 0) {
+      setCurrentQIndex(prev => prev - 1);
+    }
+  };
+
+  // ── Final Battle Submission ─────────────────────────────────────────────────
+  const handleFinishBattle = useCallback(() => {
+    if (!socket || !roomState || submitting) return;
+    setSubmitting(true);
+
+    // Emit any unanswered questions as -1 (skip)
+    const questions = roomState.questions || [];
+    questions.forEach((_, idx) => {
+      if (selectedAnswers[idx] === undefined) {
+        socket.emit('submit_answer', {
+          roomCode: roomState.roomCode,
+          userId: user.id || user._id,
+          questionIndex: idx,
+          selectedOptionIndex: -1,
+        });
+      }
+    });
+
+    // Tell server this player is done
+    socket.emit('player_finished', {
+      roomCode: roomState.roomCode,
+      userId: user.id || user._id,
+    });
+  }, [socket, roomState, selectedAnswers, submitting]);
+
   const handleRematch = () => {
-    if (!socket || !roomState) return;
     setSelectedAnswers({});
     setCurrentQIndex(0);
     setLeaderboard(null);
-    socket.emit('request_rematch', { roomCode: roomState.roomCode, userId: user.id || user._id });
+    setReviewQuestions([]);
+    setSubmitting(false);
+    if (socket && roomState) {
+      socket.emit('request_rematch', { roomCode: roomState.roomCode, userId: user.id || user._id });
+    }
   };
 
-  const formatTimer = (totalSeconds) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  const handleLeaveRoom = () => {
+    if (socket && roomState) {
+      socket.emit('leave_room', { roomCode: roomState.roomCode, userId: user.id || user._id });
+    }
+    setRoomState(null);
+    setSelectedAnswers({});
+    setCurrentQIndex(0);
+    setLeaderboard(null);
+    setSubmitting(false);
+    setError('');
   };
 
-  // 1. Initial Room Selection View
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VIEW 1: Room Setup (Create / Join)
+  // ═══════════════════════════════════════════════════════════════════════════
   if (!roomState) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
-        <div className="glass-panel p-6 rounded-2xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 border border-amber-500/30 text-center space-y-2">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/40 mb-2">
-            <Swords className="w-8 h-8" />
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+
+        {/* Header */}
+        <div className="bg-[#244A73] p-6 rounded-2xl text-center space-y-2 shadow-sm">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-white/10 flex items-center justify-center mb-2">
+            <Swords className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-black text-white">REALTIME MULTIPLAYER BATTLE ARENA</h1>
-          <p className="text-xs text-slate-400 max-w-lg mx-auto">
-            Compete live with 2–3 friends online. Synchronized timer, server-authoritative scoring & instant rematch!
+          <h1 className="text-2xl font-black text-white">REALTIME BATTLE ARENA</h1>
+          <p className="text-xs text-white/70 max-w-lg mx-auto">
+            Compete live with friends. Synchronized timer, server-validated scoring.
           </p>
         </div>
 
         {error && (
-          <div className="p-3 rounded-lg bg-red-950/60 border border-red-800 text-red-200 text-xs flex items-center justify-center gap-2">
-            <AlertCircle className="w-4 h-4" />
+          <div className="p-3 rounded-xl bg-red-50 border border-red-300 text-red-700 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          {/* Create Room Box */}
-          <div className="glass-panel p-6 rounded-2xl border border-slate-700/80 space-y-4">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <Swords className="w-4 h-4 text-amber-400" /> Create Battle Room
+
+          {/* Create Room */}
+          <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm space-y-4">
+            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+              <Swords className="w-4 h-4 text-[#244A73]" /> Create Battle Room
             </h2>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-300 mb-1 font-semibold">Subject</label>
+                <label className="block text-[#66635D] mb-1 font-semibold">Subject</label>
                 <select
                   value={config.subject}
                   onChange={e => setConfig({ ...config, subject: e.target.value })}
-                  className="w-full glass-input"
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]"
                 >
-                  <option value="Indian Polity">Indian Polity</option>
-                  <option value="History">History</option>
-                  <option value="Geography">Geography</option>
-                  <option value="Science">Science</option>
-                  <option value="Economics">Economics</option>
-                  <option value="Computer">Computer</option>
-                  <option value="Mathematics">Mathematics</option>
+                  {SUBJECTS.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
                 </select>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-slate-300 mb-1 font-semibold">Question Count</label>
+                  <label className="block text-[#66635D] mb-1 font-semibold">Questions</label>
                   <select
                     value={config.questionCount}
                     onChange={e => setConfig({ ...config, questionCount: Number(e.target.value) })}
-                    className="w-full glass-input"
+                    className="w-full px-3 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]"
                   >
-                    <option value={5}>5 Questions</option>
-                    <option value={10}>10 Questions</option>
-                    <option value={15}>15 Questions</option>
-                    <option value={20}>20 Questions</option>
+                    {[5, 10, 15, 20].map(n => (
+                      <option key={n} value={n}>{n} Questions</option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 mb-1 font-semibold">Time Limit (Mins)</label>
+                  <label className="block text-[#66635D] mb-1 font-semibold">Time Limit</label>
                   <select
                     value={config.timeLimitMinutes}
                     onChange={e => setConfig({ ...config, timeLimitMinutes: Number(e.target.value) })}
-                    className="w-full glass-input"
+                    className="w-full px-3 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]"
                   >
-                    <option value={3}>3 Minutes</option>
-                    <option value={5}>5 Minutes</option>
-                    <option value={10}>10 Minutes</option>
+                    {[3, 5, 10, 15].map(m => (
+                      <option key={m} value={m}>{m} Minutes</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[#66635D] mb-1 font-semibold">Difficulty</label>
+                  <select
+                    value={config.difficulty}
+                    onChange={e => setConfig({ ...config, difficulty: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]"
+                  >
+                    {['All', 'Easy', 'Medium', 'Hard'].map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[#66635D] mb-1 font-semibold">Negative Marks</label>
+                  <select
+                    value={config.negativeMarking}
+                    onChange={e => setConfig({ ...config, negativeMarking: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]"
+                  >
+                    <option value={0}>None</option>
+                    <option value={0.25}>-0.25 (SSC)</option>
+                    <option value={0.33}>-0.33</option>
+                    <option value={0.5}>-0.50</option>
                   </select>
                 </div>
               </div>
 
               <button
                 onClick={handleCreateRoom}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-black text-xs tracking-wider uppercase shadow-lg shadow-amber-500/20"
+                className="w-full py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs tracking-wider uppercase shadow-sm transition-all"
               >
-                CREATE ROOM & GENERATE CODE
+                CREATE ROOM & GET CODE
               </button>
             </div>
           </div>
 
-          {/* Join Room Box */}
-          <div className="glass-panel p-6 rounded-2xl border border-slate-700/80 space-y-4 flex flex-col justify-between">
+          {/* Join Room */}
+          <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm space-y-4 flex flex-col justify-between">
             <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
-                <Users className="w-4 h-4 text-blue-400" /> Join Existing Room
+              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2 mb-3">
+                <Users className="w-4 h-4 text-[#2D6A4F]" /> Join Existing Room
               </h2>
-              <p className="text-xs text-slate-400 mb-4">
-                Enter the 6-character room code shared by your friend (e.g., K7P4XZ).
+              <p className="text-xs text-[#66635D] mb-4">
+                Enter the 6-character code shared by your friend (e.g., K7P4XZ).
               </p>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Room Code</label>
-                <input
-                  type="text"
-                  maxLength={6}
-                  placeholder="K7P4XZ"
-                  value={roomCodeInput}
-                  onChange={e => setRoomCodeInput(e.target.value.toUpperCase())}
-                  className="w-full glass-input text-center text-lg font-mono font-bold uppercase tracking-widest text-amber-300"
-                />
-              </div>
+              <label className="block text-xs font-semibold text-[#252525] mb-1">Room Code</label>
+              <input
+                type="text"
+                maxLength={6}
+                placeholder="K7P4XZ"
+                value={roomCodeInput}
+                onChange={e => setRoomCodeInput(e.target.value.toUpperCase())}
+                className="w-full px-4 py-3 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-center text-2xl font-mono font-black uppercase tracking-widest text-[#244A73] focus:outline-none focus:border-[#244A73]"
+              />
             </div>
-
             <button
               onClick={handleJoinRoom}
-              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs tracking-wider uppercase shadow-lg shadow-blue-600/30"
+              disabled={!roomCodeInput.trim()}
+              className="w-full py-3 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-xs tracking-wider uppercase shadow-sm disabled:opacity-50 transition-all"
             >
               JOIN BATTLE ROOM
             </button>
           </div>
-
         </div>
       </div>
     );
   }
 
-  // 2. Lobby View
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VIEW 2: Lobby
+  // ═══════════════════════════════════════════════════════════════════════════
   if (roomState.status === 'LOBBY') {
     const isHost = roomState.hostId === (user.id || user._id);
     return (
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-        <div className="glass-panel p-8 rounded-3xl border border-amber-500/40 text-center space-y-6">
-          <span className="text-[10px] font-extrabold px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-widest">
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <div className="bg-[#FFFDF8] p-8 rounded-3xl border border-[#E2DACB] shadow-sm text-center space-y-6">
+
+          <span className="text-[10px] font-extrabold px-3 py-1 rounded-full bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF] uppercase tracking-widest">
             Battle Lobby
           </span>
 
+          {/* Room Code */}
           <div>
-            <span className="text-xs text-[#66635D] font-semibold uppercase tracking-wider block">Share Room Code</span>
-            <span className="text-4xl font-mono font-black text-[#244A73] tracking-widest select-all bg-[#F7F3EA] px-6 py-2 rounded-2xl border border-[#E2DACB] inline-block mt-2">
-              {roomState.roomCode}
+            <span className="text-xs text-[#66635D] font-semibold uppercase tracking-wider block mb-2">
+              Share this Room Code with your friends
             </span>
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#FFFDF8] border border-[#E2DACB] space-y-3 shadow-sm">
-            <h3 className="text-xs font-bold text-[#252525] uppercase tracking-wider">
-              Connected Aspirants ({roomState.players.length}/4)
-            </h3>
-            <div className="space-y-2">
-              {roomState.players.map((p, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-[#F7F3EA] border border-[#E2DACB] text-xs font-bold text-[#252525]">
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2 h-2 rounded-full bg-[#2D6A4F] animate-pulse"></span>
-                    <span>{p.name} {p.userId === roomState.hostId && '(Host)'}</span>
-                  </div>
-                  <span className="text-[#2D6A4F] text-[10px] px-2 py-0.5 rounded bg-[#EFE9DC] border border-[#2D6A4F]/30 font-bold">
-                    READY
-                  </span>
-                </div>
-              ))}
+            <div className="flex items-center justify-center gap-3">
+              <span className="text-4xl font-mono font-black text-[#244A73] tracking-widest bg-[#F7F3EA] px-6 py-3 rounded-2xl border border-[#E2DACB] select-all">
+                {roomState.roomCode}
+              </span>
+              <button
+                onClick={handleCopyCode}
+                className="p-3 rounded-xl bg-[#EFE9DC] border border-[#D5CDBF] text-[#244A73] hover:bg-[#E2DACB] transition-all"
+                title="Copy code"
+              >
+                {copied ? <CheckCircle2 className="w-5 h-5 text-[#2D6A4F]" /> : <Copy className="w-5 h-5" />}
+              </button>
             </div>
           </div>
 
-          {isHost ? (
+          {/* Config summary */}
+          <div className="flex flex-wrap justify-center gap-2 text-[10px] font-bold">
+            <span className="px-2.5 py-1 rounded-full bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF]">{roomState.config.subject}</span>
+            <span className="px-2.5 py-1 rounded-full bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF]">{roomState.config.questionCount} Questions</span>
+            <span className="px-2.5 py-1 rounded-full bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF]">{roomState.config.timeLimitMinutes} Min Timer</span>
+          </div>
+
+          {/* Players */}
+          <div className="bg-[#F7F3EA] p-4 rounded-xl border border-[#E2DACB] space-y-2">
+            <h3 className="text-xs font-bold text-[#252525] uppercase tracking-wider mb-3">
+              Players ({roomState.players.length}/3)
+            </h3>
+            {roomState.players.map((p, idx) => (
+              <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-[#FFFDF8] border border-[#E2DACB] text-xs font-bold text-[#252525]">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#2D6A4F] animate-pulse"></span>
+                  <span>{p.name} {p.userId === roomState.hostId && '⭐ Host'}</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-[#D1FAE5] border border-[#10B981] text-[#065F46] font-bold">READY</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {isHost ? (
+              <button
+                onClick={handleStartBattle}
+                disabled={roomState.players.length < 1}
+                className="w-full py-4 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                <Play className="w-4 h-4 fill-white" /> START BATTLE NOW
+              </button>
+            ) : (
+              <p className="text-xs text-[#244A73] font-semibold animate-pulse py-4">
+                Waiting for host to start the battle...
+              </p>
+            )}
             <button
-              onClick={handleStartBattle}
-              className="w-full py-3.5 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
+              onClick={handleLeaveRoom}
+              className="w-full py-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#66635D] font-bold text-xs hover:bg-[#EFE9DC]"
             >
-              <Play className="w-4 h-4 fill-white" /> START MULTIPLAYER BATTLE NOW
+              Leave Room
             </button>
-          ) : (
-            <p className="text-xs text-[#244A73] font-semibold animate-pulse">
-              Waiting for room host to start the battle...
-            </p>
-          )}
+          </div>
         </div>
       </div>
     );
   }
 
-  // 3. Battle Finished Results View
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VIEW 3: Results / Leaderboard
+  // ═══════════════════════════════════════════════════════════════════════════
   if (roomState.status === 'FINISHED' && leaderboard) {
+    const myEntry = leaderboard.find(p => p.userId === (user.id || user._id));
     return (
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+
+        {/* Leaderboard Card */}
         <div className="bg-[#FFFDF8] p-8 rounded-3xl border border-[#E2DACB] shadow-sm text-center space-y-6">
-          <div className="w-16 h-16 mx-auto rounded-full bg-[#EFE9DC] text-[#244A73] flex items-center justify-center border border-[#E2DACB]">
+          <div className="w-16 h-16 mx-auto rounded-full bg-[#EFE9DC] flex items-center justify-center border border-[#E2DACB]">
             <Trophy className="w-8 h-8 text-[#244A73]" />
           </div>
-          <h2 className="text-2xl font-black text-[#252525]">BATTLE FINAL LEADERBOARD</h2>
+          <h2 className="text-2xl font-black text-[#252525]">BATTLE RESULTS</h2>
 
-          <div className="space-y-3">
+          {myEntry && (
+            <div className="p-4 rounded-xl bg-[#EFE9DC] border border-[#244A73] text-sm">
+              <p className="text-xs text-[#66635D] font-semibold">Your Score</p>
+              <p className="text-3xl font-black text-[#244A73]">{myEntry.score} <span className="text-base font-bold">pts</span></p>
+              <p className="text-xs text-[#66635D]">{myEntry.correctCount} correct · {myEntry.wrongCount} wrong · {myEntry.accuracy}% accuracy</p>
+            </div>
+          )}
+
+          <div className="space-y-2">
             {leaderboard.map((item) => {
-              const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : '🥉';
+              const medals = ['🥇', '🥈', '🥉'];
+              const isMe = item.userId === (user.id || user._id);
               return (
                 <div
                   key={item.userId}
-                  className={`flex items-center justify-between p-4 rounded-xl border text-xs font-bold transition-all ${
-                    item.rank === 1
+                  className={`flex items-center justify-between p-4 rounded-xl border text-xs font-bold ${
+                    isMe
                       ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73]'
                       : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
                   }`}
                 >
-                  <div className="flex items-center space-x-3">
-                    <span className="text-lg">{medal}</span>
-                    <span>{item.name}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-base">{medals[item.rank - 1] || `#${item.rank}`}</span>
+                    <span>{item.name} {isMe && '(You)'}</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-sm font-black text-[#244A73] block">{item.score} PTS</span>
-                    <span className="text-[10px] text-[#66635D] font-normal">{item.accuracy}% Accuracy</span>
+                    <span className="text-sm font-black text-[#244A73] block">{item.score} pts</span>
+                    <span className="text-[10px] text-[#66635D] font-normal">{item.correctCount}✓ {item.wrongCount}✗ · {item.accuracy}%</span>
                   </div>
                 </div>
               );
             })}
           </div>
 
-          <button
-            onClick={handleRematch}
-            className="w-full py-3.5 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
-          >
-            <RotateCcw className="w-4 h-4" /> REMATCH (SAME PLAYERS)
-          </button>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={handleRematch}
+              className="py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" /> Rematch
+            </button>
+            <button
+              onClick={handleLeaveRoom}
+              className="py-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#252525] font-bold text-xs uppercase"
+            >
+              Exit
+            </button>
+          </div>
         </div>
+
+        {/* Question Review */}
+        {reviewQuestions.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-[#252525]">Question Review</h3>
+            {reviewQuestions.map((q, idx) => {
+              const myAns = selectedAnswers[idx];
+              const isCorrect = myAns === q.correctAnswer;
+              const isSkipped = myAns === undefined || myAns === -1;
+              return (
+                <div key={idx} className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] space-y-3">
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-bold text-[#66635D]">Q{idx + 1}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      isSkipped ? 'bg-[#EFE9DC] text-[#66635D]' :
+                      isCorrect ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#FEE2E2] text-[#991B1B]'
+                    }`}>
+                      {isSkipped ? 'SKIPPED' : isCorrect ? '✓ CORRECT' : '✗ WRONG'}
+                    </span>
+                  </div>
+                  <p className="text-sm font-bold text-[#252525]">{q.question}</p>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {q.options?.map((opt, oIdx) => {
+                      const isCorrectOpt = oIdx === q.correctAnswer;
+                      const isMyChoice = oIdx === myAns;
+                      let style = 'bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]';
+                      if (isCorrectOpt) style = 'bg-[#D1FAE5] border-[#10B981] text-[#065F46] font-bold';
+                      else if (isMyChoice && !isCorrectOpt) style = 'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-bold';
+                      return (
+                        <div key={oIdx} className={`px-3 py-2 rounded-lg border text-xs ${style}`}>
+                          <strong className="mr-2">{String.fromCharCode(65 + oIdx)}.</strong>{opt}
+                          {isCorrectOpt && <span className="ml-2 text-[10px]">(Correct)</span>}
+                          {isMyChoice && !isCorrectOpt && <span className="ml-2 text-[10px]">(Your answer)</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {q.explanation && (
+                    <p className="text-[11px] text-[#252525] bg-[#F7F3EA] p-2.5 rounded-lg border border-[#E2DACB]">
+                      <strong className="text-[#244A73]">Explanation: </strong>{q.explanation}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
 
-  // 4. Live In-Progress Battle Test View
-  const currentQ = roomState.questions?.[currentQIndex];
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VIEW 4: Live Battle — IN PROGRESS
+  // ═══════════════════════════════════════════════════════════════════════════
+  const questions = roomState?.questions || [];
+  const currentQ = questions[currentQIndex];
+  const totalQ = questions.length;
+  const isAnswered = selectedAnswers[currentQIndex] !== undefined;
+  const isLastQuestion = currentQIndex === totalQ - 1;
+  const answeredCount = Object.keys(selectedAnswers).filter(k => selectedAnswers[k] !== undefined && selectedAnswers[k] !== -1).length;
+  const isTimeLow = timeLeft > 0 && timeLeft < 60;
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-      
-      {/* Top Synchronized Server Status & Timer Header */}
-      <div className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] flex justify-between items-center shadow-sm">
-        <div className="flex items-center space-x-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
-          <span className="text-xs font-black text-[#244A73]">LIVE BATTLE ARENA</span>
+    <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
+
+      {/* ── Header Bar ── */}
+      <div className="bg-[#FFFDF8] px-4 py-3 rounded-2xl border border-[#E2DACB] shadow-sm flex items-center justify-between gap-3">
+        <div>
+          <span className="flex items-center gap-1.5 text-xs font-black text-[#252525]">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            LIVE BATTLE · {roomState?.config?.subject}
+          </span>
+          <span className="text-[10px] text-[#66635D] font-medium block mt-0.5">
+            {answeredCount} of {totalQ} answered
+          </span>
         </div>
 
-        <div className="flex items-center space-x-1.5 bg-[#F7F3EA] px-3 py-1 rounded-xl border border-[#E2DACB] text-xs font-black text-[#244A73]">
-          <Clock className="w-4 h-4 text-[#244A73]" />
+        <div className={`flex items-center gap-1.5 px-4 py-2 rounded-xl border font-mono font-black text-sm ${
+          isTimeLow
+            ? 'bg-red-50 text-red-600 border-red-300 animate-pulse'
+            : 'bg-[#F7F3EA] text-[#244A73] border-[#E2DACB]'
+        }`}>
+          <Clock className="w-4 h-4" />
           <span>{formatTimer(timeLeft)}</span>
         </div>
       </div>
 
-      {/* Live Question Box */}
-      {currentQ && (
+      {/* ── Live Players Status ── */}
+      {roomState?.players && roomState.players.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {roomState.players.map((p, idx) => (
+            <span
+              key={idx}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#FFFDF8] border border-[#E2DACB] text-[10px] font-bold text-[#252525]"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-[#2D6A4F]"></span>
+              {p.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* ── Question Card ── */}
+      {currentQ ? (
         <div className="bg-[#FFFDF8] p-6 rounded-2xl border border-[#E2DACB] shadow-sm space-y-5">
-          <div className="flex justify-between items-center text-xs font-bold text-[#66635D]">
-            <span>Question {currentQIndex + 1} of {roomState.questions.length}</span>
-            <span>Subject: {roomState.config.subject}</span>
+
+          {/* Progress Header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-xs font-black text-[#244A73]">
+                Question {currentQIndex + 1} of {totalQ}
+              </span>
+              <div className="w-full bg-[#EFE9DC] rounded-full h-1.5 mt-1.5" style={{ width: '180px' }}>
+                <div
+                  className="bg-[#244A73] h-1.5 rounded-full transition-all"
+                  style={{ width: `${((currentQIndex + 1) / totalQ) * 100}%` }}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-[10px] px-2.5 py-1 rounded-lg bg-[#EFE9DC] text-[#252525] border border-[#D5CDBF] font-bold">
+                {currentQ.difficulty || 'Medium'}
+              </span>
+              <span className="text-[10px] px-2.5 py-1 rounded-lg bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF] font-bold">
+                {currentQ.topic || currentQ.subject}
+              </span>
+            </div>
           </div>
 
-          <p className="text-sm sm:text-base font-extrabold text-[#252525] leading-relaxed opacity-100">
+          {/* Question Text */}
+          <p className="text-sm sm:text-base font-extrabold text-[#252525] leading-relaxed">
             {currentQ.question}
           </p>
 
+          {/* Options */}
           <div className="space-y-2.5">
-            {currentQ.options.map((opt, oIdx) => {
-              const selectedOpt = selectedAnswers[currentQIndex];
-              const isSelected = selectedOpt !== undefined;
-              const isChosen = selectedOpt === oIdx;
-
+            {(currentQ.options || []).map((opt, oIdx) => {
+              const isChosen = selectedAnswers[currentQIndex] === oIdx;
               return (
                 <button
                   key={oIdx}
-                  disabled={isSelected}
-                  onClick={() => handleAnswerSubmit(oIdx)}
+                  onClick={() => handleSelectAnswer(oIdx)}
                   className={`w-full text-left p-3.5 rounded-xl border text-xs sm:text-sm font-semibold transition-all flex items-center justify-between ${
                     isChosen
                       ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73] font-black shadow-sm'
-                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525] hover:border-[#244A73]'
+                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525] hover:border-[#244A73] hover:bg-[#EFE9DC]/50'
                   }`}
                 >
-                  <span className="text-[#252525] font-semibold"><strong className="mr-2 text-[#244A73]">{String.fromCharCode(65 + oIdx)}.</strong> {opt}</span>
+                  <span>
+                    <strong className="mr-2 text-[#244A73]">{String.fromCharCode(65 + oIdx)}.</strong>
+                    {opt}
+                  </span>
                   {isChosen && <CheckCircle2 className="w-5 h-5 text-[#244A73] shrink-0" />}
                 </button>
               );
             })}
           </div>
 
-          <div className="pt-4 border-t border-[#E2DACB] flex justify-end">
-            {currentQIndex < roomState.questions.length - 1 && (
+          {/* ── Navigation Controls ── */}
+          <div className="border-t border-[#E2DACB] pt-4 flex items-center justify-between gap-3">
+            {/* Previous */}
+            <button
+              onClick={handlePrev}
+              disabled={currentQIndex === 0}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#252525] font-bold text-xs disabled:opacity-40 hover:bg-[#EFE9DC] transition-all"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Previous
+            </button>
+
+            {/* Question palette dots */}
+            <div className="flex gap-1 flex-wrap justify-center max-w-xs">
+              {questions.map((_, idx) => {
+                const ans = selectedAnswers[idx] !== undefined && selectedAnswers[idx] !== -1;
+                const active = idx === currentQIndex;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentQIndex(idx)}
+                    className={`w-6 h-6 rounded-md text-[10px] font-bold border transition-all ${
+                      active
+                        ? 'bg-[#244A73] text-white border-[#1B3857] ring-2 ring-[#244A73] ring-offset-1'
+                        : ans
+                        ? 'bg-[#2D6A4F] text-white border-[#1B4332]'
+                        : 'bg-[#F7F3EA] text-[#66635D] border-[#E2DACB] hover:border-[#244A73]'
+                    }`}
+                  >
+                    {idx + 1}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Next or Submit */}
+            {isLastQuestion ? (
               <button
-                onClick={() => setCurrentQIndex(currentQIndex + 1)}
-                className="py-2.5 px-6 rounded-lg bg-[#244A73] hover:bg-[#1B3857] text-white font-bold text-xs"
+                onClick={handleFinishBattle}
+                disabled={submitting}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-xs uppercase tracking-wider shadow-sm disabled:opacity-60 transition-all"
               >
-                Next Question
+                {submitting ? 'Submitting...' : 'Submit Exam'}
+                {!submitting && <CheckCircle2 className="w-3.5 h-3.5" />}
+              </button>
+            ) : (
+              <button
+                onClick={handleNext}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider shadow-sm transition-all"
+              >
+                Next <ArrowRight className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
+
+          {/* Skip hint when unanswered */}
+          {!isAnswered && (
+            <p className="text-center text-[10px] text-[#66635D]">
+              Select an answer or click Next to skip this question.
+            </p>
+          )}
+
+        </div>
+      ) : (
+        <div className="bg-[#FFFDF8] p-8 rounded-2xl border border-[#E2DACB] text-center text-sm text-[#66635D]">
+          Loading questions...
         </div>
       )}
 

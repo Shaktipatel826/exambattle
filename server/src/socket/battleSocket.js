@@ -237,9 +237,7 @@ export const initializeBattleSocket = (io) => {
       const question = room.questions[questionIndex];
       if (!question) return;
 
-      // Duplicate submission guard
-      if (player.answers[questionIndex] !== undefined) return;
-
+      // Allow answer override (player can change answer before submitting final)
       player.answers[questionIndex] = selectedOptionIndex;
       player.status = 'Answered';
 
@@ -261,12 +259,41 @@ export const initializeBattleSocket = (io) => {
       }
     });
 
-    // Manual Finish Request
+    // Manual Finish Request (host or anyone can trigger early end)
     socket.on('finish_battle_early', async ({ roomCode, userId }) => {
       const cleanCode = roomCode.trim().toUpperCase();
       const room = activeRooms.get(cleanCode);
       if (!room || room.status !== 'IN_PROGRESS') return;
       await finishBattle(room, io);
+    });
+
+    // Player clicked "Submit Exam" — mark them done, finish if all done (or immediately for solo)
+    socket.on('player_finished', async ({ roomCode, userId }) => {
+      const cleanCode = roomCode?.trim().toUpperCase();
+      if (!cleanCode) return;
+      const room = activeRooms.get(cleanCode);
+      if (!room || room.status !== 'IN_PROGRESS') return;
+
+      const player = room.players.find(p => p.userId === userId);
+      if (player) player.finished = true;
+
+      // If all players have finished, or only 1 player in room → end immediately
+      const allDone = room.players.every(p => p.finished);
+      if (allDone || room.players.length === 1) {
+        await finishBattle(room, io);
+      } else {
+        // Notify others that this player finished
+        io.to(cleanCode).emit('player_status_changed', {
+          userId,
+          questionIndex: -1,
+          players: room.players.map(p => ({
+            userId: p.userId,
+            name: p.name,
+            finished: !!p.finished,
+            totalSubmitted: Object.keys(p.answers).length
+          }))
+        });
+      }
     });
 
     // Rematch Request
@@ -287,9 +314,16 @@ export const initializeBattleSocket = (io) => {
         p.status = 'Thinking';
       });
 
-      const freshQuestions = await Question.find({ subject: room.config.subject, status: 'PUBLISHED' }).limit(room.config.questionCount).lean();
-      if (freshQuestions && freshQuestions.length > 0) {
-        room.questions = freshQuestions;
+      const availableForRematch = await Question.countDocuments({ subject: room.config.subject, status: 'PUBLISHED' });
+      if (availableForRematch > 0) {
+        const freshQuestions = await Question.aggregate([
+          { $match: { subject: room.config.subject, status: 'PUBLISHED' } },
+          { $sample: { size: Math.min(room.config.questionCount, availableForRematch) } }
+        ]);
+        if (freshQuestions && freshQuestions.length > 0) {
+          room.questions = freshQuestions;
+          room.config.questionCount = freshQuestions.length;
+        }
       }
 
       io.to(cleanCode).emit('room_updated', sanitizeRoomState(room));
