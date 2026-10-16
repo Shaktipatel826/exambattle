@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  Swords, BookOpen, Shield, Sparkles, RefreshCw, Trophy, Users, ArrowRight, UserCheck, CheckCircle2, Lock
+  Swords, BookOpen, Shield, Sparkles, RefreshCw, Trophy, Users, ArrowRight, UserCheck, CheckCircle2, Lock, Cpu
 } from 'lucide-react';
 
 export const PublicHomePage = ({ onSelectMode }) => {
