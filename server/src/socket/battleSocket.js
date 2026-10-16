@@ -50,10 +50,24 @@ export const initializeBattleSocket = (io) => {
         if (config.topic && config.topic !== 'All') query.topic = config.topic;
         if (config.difficulty && config.difficulty !== 'All') query.difficulty = config.difficulty;
 
-        questions = await Question.find(query).limit(config.questionCount || 10).lean();
-        
+        const requestedCount = config.questionCount || 10;
+
+        // Use $sample for random selection — prevents always serving the same questions
+        const availableCount = await Question.countDocuments(query);
+        if (availableCount > 0) {
+          const sampleSize = Math.min(requestedCount, availableCount);
+          questions = await Question.aggregate([
+            { $match: query },
+            { $sample: { size: sampleSize } }
+          ]);
+        }
+
         if (!questions || questions.length === 0) {
-          questions = getFallbackBattleQuestions(config.questionCount || 10, config.subject || 'Polity');
+          questions = getFallbackBattleQuestions(requestedCount, config.subject || 'Polity');
+        }
+
+        if (questions.length < requestedCount) {
+          console.warn(`[Battle] Requested ${requestedCount} questions for subject="${config.subject}", only ${questions.length} available.`);
         }
 
         const roomState = {

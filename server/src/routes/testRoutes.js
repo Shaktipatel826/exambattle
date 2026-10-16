@@ -46,11 +46,27 @@ router.post('/create', authMiddleware, async (req, res) => {
     if (difficulty && difficulty !== 'All') query.difficulty = difficulty;
 
     const countToFetch = Math.max(1, Math.min(100, Number(questionCount)));
-    let questions = await Question.find(query).limit(countToFetch).lean();
+
+    // Use $sample for random question selection (prevents always serving the same first N)
+    const availableCount = await Question.countDocuments(query);
+    let questions = [];
+
+    if (availableCount > 0) {
+      questions = await Question.aggregate([
+        { $match: query },
+        { $sample: { size: Math.min(countToFetch, availableCount) } }
+      ]);
+    }
 
     if (!questions || questions.length === 0) {
-      // Fallback: any published questions
-      questions = await Question.find({ status: 'PUBLISHED' }).limit(countToFetch).lean();
+      // Fallback: any published questions (ignoring subject/topic/difficulty filters)
+      const fallbackCount = await Question.countDocuments({ status: 'PUBLISHED' });
+      if (fallbackCount > 0) {
+        questions = await Question.aggregate([
+          { $match: { status: 'PUBLISHED' } },
+          { $sample: { size: Math.min(countToFetch, fallbackCount) } }
+        ]);
+      }
     }
 
     if (!questions || questions.length === 0) {
