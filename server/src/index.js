@@ -22,7 +22,9 @@ import socialRoutes from './routes/socialRoutes.js';
 import examRoutes from './routes/examRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import studentRoutes from './routes/studentRoutes.js';
+import docToTestRoutes from './routes/docToTestRoutes.js';
 import taxonomyRoutes from './routes/taxonomyRoutes.js';
+import savedTestRoutes from './routes/savedTestRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,6 +55,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/questions', questionRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/ai/doc-to-test', docToTestRoutes);
 app.use('/api/tests', testRoutes);
 app.use('/api/revision', revisionRoutes);
 app.use('/api/social', socialRoutes);
@@ -61,6 +64,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/taxonomy', taxonomyRoutes);
 app.use('/api', taxonomyRoutes);
+app.use('/api/saved-tests', savedTestRoutes);
 
 // Health Check
 app.get('/api/health', (req, res) => {

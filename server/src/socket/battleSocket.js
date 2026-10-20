@@ -98,7 +98,8 @@ export const initializeBattleSocket = (io) => {
           }],
           startTime: null,
           endTime: null,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          _customQuestions: true  // rematch keeps original questions
         };
 
         activeRooms.set(roomCode, roomState);
@@ -108,6 +109,130 @@ export const initializeBattleSocket = (io) => {
           callback({ success: true, roomCode, room: roomState });
         }
       } catch (err) {
+        if (typeof callback === 'function') callback({ success: false, message: err.message });
+      }
+    });
+
+    // Create Room with pre-supplied questions (from newly generated test — no DB save required)
+    socket.on('create_room_with_questions', async ({ user, config, questions }, callback) => {
+      try {
+        if (!user || (!user.id && !user._id)) {
+          if (typeof callback === 'function') callback({ success: false, message: 'Unauthorized.' });
+          return;
+        }
+        if (!Array.isArray(questions) || questions.length === 0) {
+          if (typeof callback === 'function') callback({ success: false, message: 'No questions provided.' });
+          return;
+        }
+
+        const roomCode = generateRoomCode();
+        const roomState = {
+          roomId: roomCode,
+          roomCode,
+          hostId: user.id || user._id,
+          config: {
+            subject: config?.subject || 'Custom Test',
+            topic: config?.topic || 'General',
+            questionCount: questions.length,
+            timeLimitMinutes: config?.timeLimitMinutes || 10,
+            negativeMarking: config?.negativeMarking ?? 0.25,
+            difficulty: config?.difficulty || 'Mixed'
+          },
+          status: 'LOBBY',
+          questions,
+          players: [{
+            userId: user.id || user._id,
+            name: user.name,
+            socketId: socket.id,
+            isReady: true,
+            status: 'Thinking',
+            score: 0,
+            correctCount: 0,
+            wrongCount: 0,
+            unattemptedCount: questions.length,
+            answers: {}
+          }],
+          startTime: null,
+          endTime: null,
+          createdAt: Date.now(),
+          _customQuestions: true  // rematch keeps original questions
+        };
+
+        activeRooms.set(roomCode, roomState);
+        socket.join(roomCode);
+        if (typeof callback === 'function') callback({ success: true, roomCode, room: roomState });
+      } catch (err) {
+        if (typeof callback === 'function') callback({ success: false, message: err.message });
+      }
+    });
+
+    // Create Room from a Saved Test (fetches questions from DB)
+    socket.on('create_room_from_saved_test', async ({ user, savedTestId, config }, callback) => {
+      try {
+        if (!user || (!user.id && !user._id)) {
+          if (typeof callback === 'function') callback({ success: false, message: 'Unauthorized.' });
+          return;
+        }
+
+        // Import SavedTest model dynamically to avoid circular deps
+        const { SavedTest } = await import('../models/SavedTest.js');
+        const savedTest = await SavedTest.findById(savedTestId);
+        if (!savedTest) {
+          if (typeof callback === 'function') callback({ success: false, message: 'Saved test not found.' });
+          return;
+        }
+
+        // Ownership check
+        const requestUserId = String(user.id || user._id);
+        if (savedTest.userId !== requestUserId) {
+          if (typeof callback === 'function') callback({ success: false, message: 'Access denied to this saved test.' });
+          return;
+        }
+
+        const questions = savedTest.questions;
+        if (!questions || questions.length === 0) {
+          if (typeof callback === 'function') callback({ success: false, message: 'Saved test has no questions.' });
+          return;
+        }
+
+        const roomCode = generateRoomCode();
+        const roomState = {
+          roomId: roomCode,
+          roomCode,
+          hostId: requestUserId,
+          config: {
+            subject: savedTest.subject || 'Custom Test',
+            topic: savedTest.topic || 'General',
+            questionCount: questions.length,
+            timeLimitMinutes: config?.timeLimitMinutes || 10,
+            negativeMarking: config?.negativeMarking ?? 0.25,
+            difficulty: savedTest.difficulty || 'Mixed'
+          },
+          status: 'LOBBY',
+          questions,
+          players: [{
+            userId: requestUserId,
+            name: user.name,
+            socketId: socket.id,
+            isReady: true,
+            status: 'Thinking',
+            score: 0,
+            correctCount: 0,
+            wrongCount: 0,
+            unattemptedCount: questions.length,
+            answers: {}
+          }],
+          startTime: null,
+          endTime: null,
+          createdAt: Date.now(),
+          _customQuestions: true  // rematch keeps original questions
+        };
+
+        activeRooms.set(roomCode, roomState);
+        socket.join(roomCode);
+        if (typeof callback === 'function') callback({ success: true, roomCode, room: roomState, testTitle: savedTest.title });
+      } catch (err) {
+        console.error('[Socket] create_room_from_saved_test error:', err.message);
         if (typeof callback === 'function') callback({ success: false, message: err.message });
       }
     });
@@ -234,6 +359,12 @@ export const initializeBattleSocket = (io) => {
       const player = room.players.find(p => p.userId === userId);
       if (!player) return;
 
+      // SECURITY: Prevent impersonation — only the socket that owns this userId slot may submit
+      if (player.socketId !== socket.id) {
+        console.warn(`[Socket Security] submit_answer blocked: socket ${socket.id} tried to submit as userId=${userId} (owner socketId=${player.socketId})`);
+        return;
+      }
+
       const question = room.questions[questionIndex];
       if (!question) return;
 
@@ -259,11 +390,18 @@ export const initializeBattleSocket = (io) => {
       }
     });
 
-    // Manual Finish Request (host or anyone can trigger early end)
+    // Manual Finish Request (host only — others cannot force-end the room)
     socket.on('finish_battle_early', async ({ roomCode, userId }) => {
       const cleanCode = roomCode.trim().toUpperCase();
       const room = activeRooms.get(cleanCode);
       if (!room || room.status !== 'IN_PROGRESS') return;
+
+      // SECURITY: Only the host may force-end a battle early
+      if (room.hostId !== userId) {
+        console.warn(`[Socket Security] finish_battle_early blocked: userId=${userId} is not the host of room ${cleanCode}`);
+        return;
+      }
+
       await finishBattle(room, io);
     });
 
@@ -275,7 +413,9 @@ export const initializeBattleSocket = (io) => {
       if (!room || room.status !== 'IN_PROGRESS') return;
 
       const player = room.players.find(p => p.userId === userId);
-      if (player) player.finished = true;
+      // SECURITY: Only the owning socket may mark this player as finished
+      if (!player || player.socketId !== socket.id) return;
+      player.finished = true;
 
       // If all players have finished, or only 1 player in room → end immediately
       const allDone = room.players.every(p => p.finished);
@@ -312,19 +452,26 @@ export const initializeBattleSocket = (io) => {
         p.unattemptedCount = room.questions.length;
         p.answers = {};
         p.status = 'Thinking';
+        p.finished = false;
       });
 
-      const availableForRematch = await Question.countDocuments({ subject: room.config.subject, status: 'PUBLISHED' });
-      if (availableForRematch > 0) {
-        const freshQuestions = await Question.aggregate([
-          { $match: { subject: room.config.subject, status: 'PUBLISHED' } },
-          { $sample: { size: Math.min(room.config.questionCount, availableForRematch) } }
-        ]);
-        if (freshQuestions && freshQuestions.length > 0) {
-          room.questions = freshQuestions;
-          room.config.questionCount = freshQuestions.length;
+      // Only replace questions with fresh DB questions if this was a standard room
+      // (not a custom/saved-test room). Custom rooms keep their original questions on rematch.
+      const isCustomRoom = room._customQuestions === true;
+      if (!isCustomRoom) {
+        const availableForRematch = await Question.countDocuments({ subject: room.config.subject, status: 'PUBLISHED' });
+        if (availableForRematch > 0) {
+          const freshQuestions = await Question.aggregate([
+            { $match: { subject: room.config.subject, status: 'PUBLISHED' } },
+            { $sample: { size: Math.min(room.config.questionCount, availableForRematch) } }
+          ]);
+          if (freshQuestions && freshQuestions.length > 0) {
+            room.questions = freshQuestions;
+            room.config.questionCount = freshQuestions.length;
+          }
         }
       }
+      // Custom/saved-test rooms: reset player scores but keep the same questions
 
       io.to(cleanCode).emit('room_updated', sanitizeRoomState(room));
       if (typeof callback === 'function') callback({ success: true, room: sanitizeRoomState(room) });

@@ -22,7 +22,7 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
     { id: 'HOME', label: 'Home', icon: Home },
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
-    { id: 'AI_STUDY', label: 'AI Study', icon: Sparkles },
+    { id: 'CREATE_TEST', label: 'Create Test', icon: Cpu },
     { id: 'PROFILE', label: 'Profile', icon: User, isProfile: true }
   ];
 
@@ -30,8 +30,8 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
     { id: 'HOME', label: 'Home', icon: Home },
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
-    { id: 'AI_STUDY', label: 'AI Study Lab', icon: Sparkles },
-    { id: 'REVISION', label: 'Revision', icon: RefreshCw },
+    { id: 'CREATE_TEST', label: 'Create Test', icon: Cpu },
+    { id: 'SAVED_TESTS', label: 'Saved Tests', icon: BookOpen },
     { id: 'GAMIFICATION', label: 'Progress', icon: Trophy },
     { id: 'SOCIAL', label: 'Friends', icon: Users },
     { id: 'QUESTIONS', label: 'Question Bank', icon: BookOpen }

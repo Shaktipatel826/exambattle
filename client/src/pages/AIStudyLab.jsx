@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, UploadCloud, FileText, CheckCircle2, AlertCircle, 
-  HelpCircle, BookOpen, Clock, Tag
+  HelpCircle, BookOpen, Clock, Tag, Cpu
 } from 'lucide-react';
+import { DocToTestPanel } from './DocToTestPanel';
 
-export const AIStudyLab = ({ token }) => {
+export const AIStudyLab = ({ token, user }) => {
+  const [activeTab, setActiveTab] = useState('studypack'); // 'studypack' | 'doctotest'
   const [pastedText, setPastedText] = useState('');
   const [file, setFile] = useState(null);
   const [subject, setSubject] = useState('Indian Polity');
@@ -98,6 +100,27 @@ export const AIStudyLab = ({ token }) => {
         </div>
       </div>
 
+      {/* Tab Bar */}
+      <div className="flex gap-2 bg-slate-900/50 p-1.5 rounded-2xl border border-slate-700/50 w-fit">
+        <button
+          onClick={() => setActiveTab('studypack')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'studypack' ? 'bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+          <Sparkles className="w-4 h-4" /> AI Study Pack
+        </button>
+        <button
+          onClick={() => setActiveTab('doctotest')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'doctotest' ? 'bg-[#244A73] text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+          <Cpu className="w-4 h-4" /> Multi-AI Doc → Test
+        </button>
+      </div>
+
+      {/* Multi-AI Pipeline Tab */}
+      {activeTab === 'doctotest' && (
+        <DocToTestPanel token={token} user={user} />
+      )}
+
+      {/* Study Pack Tab */}
+      {activeTab === 'studypack' && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Left Column: Upload Form & Processing Status */}
@@ -364,6 +387,8 @@ export const AIStudyLab = ({ token }) => {
         </div>
 
       </div>
+      )}
+
     </div>
   );
 };

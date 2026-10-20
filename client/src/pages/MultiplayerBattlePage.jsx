@@ -21,9 +21,9 @@ const SUBJECTS = [
   'General Studies',
 ];
 
-export const MultiplayerBattlePage = ({ token, user }) => {
+export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCodeConsumed }) => {
   const [socket, setSocket] = useState(null);
-  const [roomCodeInput, setRoomCodeInput] = useState('');
+  const [roomCodeInput, setRoomCodeInput] = useState(initialRoomCode || '');
   const [roomState, setRoomState] = useState(null);
   const [config, setConfig] = useState({
     subject: 'Indian Polity',
@@ -76,6 +76,29 @@ export const MultiplayerBattlePage = ({ token, user }) => {
 
     return () => newSocket.disconnect();
   }, []);
+
+  // ── Auto-join when navigated from Create Test / Saved Tests ─────────────────
+  useEffect(() => {
+    if (!socket || !initialRoomCode || !user) return;
+    // Wait for socket to connect then auto-join
+    const doJoin = () => {
+      socket.emit('join_room', { roomCode: initialRoomCode.toUpperCase().trim(), user }, (response) => {
+        if (response?.success) {
+          setRoomState(response.room);
+          setRoomCodeInput(initialRoomCode.toUpperCase().trim());
+        } else {
+          setError(response?.message || 'Auto-join failed — room may not exist yet.');
+        }
+        if (onRoomCodeConsumed) onRoomCodeConsumed();
+      });
+    };
+    if (socket.connected) {
+      doJoin();
+    } else {
+      socket.once('connect', doJoin);
+      return () => socket.off('connect', doJoin);
+    }
+  }, [socket, initialRoomCode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Server-Authoritative Countdown ─────────────────────────────────────────
   useEffect(() => {

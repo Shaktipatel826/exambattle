@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigation } from './components/Navigation';
 import { PublicHomePage } from './pages/PublicHomePage';
@@ -14,6 +14,8 @@ import { SocialFriendsPage } from './pages/SocialFriendsPage';
 import { GamificationPage } from './pages/GamificationPage';
 import { AIStudyAssistantModal } from './pages/AIStudyAssistantModal';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { CreateTestPage } from './pages/CreateTestPage';
+import { SavedTestsPage } from './pages/SavedTestsPage';
 import { Bot } from 'lucide-react';
 
 const AppContent = () => {
@@ -27,10 +29,51 @@ const AppContent = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const [customTestConfig, setCustomTestConfig] = useState(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [battleSocket, setBattleSocket] = useState(null);
+  const socketRef = useRef(null);
+
+  // Shared Socket.io connection for CreateTestPage and SavedTestsPage
+  useEffect(() => {
+    if (!user || !token) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        setBattleSocket(null);
+      }
+      return;
+    }
+    import('socket.io-client').then(({ io }) => {
+      if (socketRef.current) socketRef.current.disconnect();
+      const s = io(window.location.origin, {
+        auth: { token },
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionDelay: 2000
+      });
+      socketRef.current = s;
+      setBattleSocket(s);
+    }).catch(() => {});
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        setBattleSocket(null);
+      }
+    };
+  }, [user?.id, token]);
 
   const handleLaunchAdminTest = (testConfig) => {
     setCustomTestConfig(testConfig);
     setActiveTab('PRACTICE');
+  };
+
+  const [battleJoinCode, setBattleJoinCode] = useState(null);
+
+  const handleNavigate = (tab, params) => {
+    if (tab === 'BATTLE' && params?.joinRoomCode) {
+      setBattleJoinCode(params.joinRoomCode);
+    }
+    setActiveTab(tab);
   };
 
   const handleLogout = () => {
@@ -141,7 +184,12 @@ const AppContent = () => {
         )}
 
         {activeTab === 'BATTLE' && (
-          <MultiplayerBattlePage token={token} user={user} />
+          <MultiplayerBattlePage
+            token={token}
+            user={user}
+            initialRoomCode={battleJoinCode}
+            onRoomCodeConsumed={() => setBattleJoinCode(null)}
+          />
         )}
 
         {activeTab === 'PRACTICE' && (
@@ -157,7 +205,25 @@ const AppContent = () => {
         )}
 
         {activeTab === 'AI_STUDY' && (
-          <AIStudyLab token={token} />
+          <AIStudyLab token={token} user={user} />
+        )}
+
+        {activeTab === 'CREATE_TEST' && (
+          <CreateTestPage
+            token={token}
+            user={user}
+            onNavigate={handleNavigate}
+            socket={battleSocket}
+          />
+        )}
+
+        {activeTab === 'SAVED_TESTS' && (
+          <SavedTestsPage
+            token={token}
+            user={user}
+            onNavigate={handleNavigate}
+            socket={battleSocket}
+          />
         )}
 
         {activeTab === 'REVISION' && (
