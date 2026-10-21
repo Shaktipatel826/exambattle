@@ -201,14 +201,21 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     formData.append('skipGroq', String(skipGroq));
     formData.append('skipVerification', String(skipVerification));
 
+    // AbortController — give up after 115 s so the UI never hangs forever
+    const controller = new AbortController();
+    const fetchTimeoutId = setTimeout(() => controller.abort(), 115000);
+
     try {
       const res = await fetch('/api/ai/doc-to-test', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
-        body: formData
+        body: formData,
+        signal: controller.signal
       });
-      const data = await res.json();
+      clearTimeout(fetchTimeoutId);
       clearInterval(stepTimerRef.current);
+
+      const data = await res.json();
 
       if (!res.ok || !data.success) {
         setError(data.message || 'Pipeline failed. Check API keys and server logs.');
@@ -229,8 +236,16 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
         setProcessing(false);
       }, 600);
     } catch (err) {
+      clearTimeout(fetchTimeoutId);
       clearInterval(stepTimerRef.current);
-      setError(`Network error: ${err.message}`);
+      if (err.name === 'AbortError') {
+        setError(
+          'Request timed out (>115 s). The pipeline is taking too long. ' +
+          'Try enabling "Skip Verification", using shorter material, or requesting fewer questions.'
+        );
+      } else {
+        setError(`Network error: ${err.message}`);
+      }
       setCurrentStep(0);
       setProcessing(false);
     }

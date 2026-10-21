@@ -13,8 +13,8 @@
  */
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-const VERIFY_TIMEOUT_MS = 25000;
-const VERIFY_MAX_RETRIES = 2;
+const VERIFY_TIMEOUT_MS = 12000; // 12 s per attempt — was 25 s
+const VERIFY_MAX_RETRIES = 1;   // 2 total attempts — was 3
 
 function getOpenRouterHeaders() {
   const apiKey = process.env.OPENROUTER_API_KEY;

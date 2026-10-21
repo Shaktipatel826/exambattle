@@ -154,6 +154,14 @@ router.post('/', authMiddleware, upload.single('file'), async (req, res) => {
       skipVerification
     });
 
+    if (!questions || questions.length === 0) {
+      return res.status(422).json({
+        success: false,
+        message: 'No questions could be generated from this material. AI providers may be slow or rate-limited. Try with shorter material or enable Skip Verification.',
+        stats
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: `Pipeline complete. Generated ${questions.length} questions ready for review.`,

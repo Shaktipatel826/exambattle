@@ -16,13 +16,13 @@ const getGenAIClient = () => {
 /**
  * Execute Gemini model request with exponential backoff & rate-limit handling
  */
-export const executeGeminiPrompt = async (prompt, modelName = process.env.GEMINI_MODEL || 'gemini-3.8-flash', timeoutMs = 30000, maxRetries = 2) => {
+export const executeGeminiPrompt = async (prompt, modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash', timeoutMs = 30000, maxRetries = 2) => {
   const aiClient = getGenAIClient();
   if (!aiClient) {
     throw new Error('GEMINI_API_KEY environment variable missing or unconfigured on server.');
   }
 
-  const candidateModels = Array.from(new Set([modelName, 'gemini-3.8-flash', 'gemini-3.5-flash']));
+  const candidateModels = Array.from(new Set([modelName, 'gemini-2.0-flash', 'gemini-1.5-flash']));
   let lastError = null;
 
   for (const targetModel of candidateModels) {

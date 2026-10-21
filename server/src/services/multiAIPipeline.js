@@ -239,7 +239,26 @@ function validateMCQItem(q, subject, topic, exam) {
  *     }
  *   }
  */
-export const runDocToTestPipeline = async ({
+// ─── Pipeline-level timeout: prevents permanent hang if AI providers stall ─────
+const PIPELINE_TIMEOUT_MS = 110000; // 110 s — leaves headroom inside Render's 120 s proxy limit
+
+export const runDocToTestPipeline = async (opts) => {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error('Pipeline timed out after 110 s. Return partial results or retry with fewer questions.')),
+      PIPELINE_TIMEOUT_MS
+    );
+  });
+
+  try {
+    return await Promise.race([_runPipeline(opts), timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+async function _runPipeline({
   extractedText,
   subject = 'General Studies',
   topic = 'General',
@@ -252,7 +271,7 @@ export const runDocToTestPipeline = async ({
   createdBy = 'Admin',
   skipGroq = false,
   skipVerification = false
-}) => {
+}) {
   if (!extractedText || extractedText.trim().length === 0) {
     throw new Error('No extracted text provided to pipeline.');
   }

@@ -27,11 +27,11 @@ function getGroqClient() {
   return groqClient;
 }
 
-const GROQ_MODEL = () => process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
-// Fallback models tried in order if primary fails
-const GROQ_FALLBACK_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'allam-2-7b'];
-const GROQ_TIMEOUT_MS = 20000;
-const GROQ_MAX_RETRIES = 2;
+const GROQ_MODEL = () => process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+// Fallback model tried if primary fails (keep list short to avoid runaway retry times)
+const GROQ_FALLBACK_MODELS = ['llama-3.1-8b-instant'];
+const GROQ_TIMEOUT_MS = 10000; // 10 s per attempt — was 20 s
+const GROQ_MAX_RETRIES = 1;   // 2 total attempts per model — was 3
 
 /**
  * Shuffle an array (Fisher-Yates) and return [shuffledArray, newIndexOf(originalItem)]
