@@ -155,9 +155,23 @@ router.post('/', authMiddleware, upload.single('file'), async (req, res) => {
     });
 
     if (!questions || questions.length === 0) {
+      // Build a detailed diagnostic message from stats
+      const diagParts = [];
+      if (stats) {
+        if (stats.understandChunksDone === 0 && stats.understandChunksTotal > 0) {
+          diagParts.push('Phase 1 (understanding) failed for all chunks — Gemini could not extract facts from this material.');
+        } else if (stats.factsExtracted === 0) {
+          diagParts.push('No facts were extracted from the material. The content may be too short, be pure audio transcript noise, or in an unsupported format.');
+        } else if (stats.generateChunksDone === 0) {
+          diagParts.push(`Facts were extracted (${stats.factsExtracted}) but question generation failed. Try enabling "Skip Verification" or using simpler material.`);
+        } else {
+          diagParts.push(`${stats.geminiGenerated || 0} questions were generated but none passed schema validation.`);
+        }
+      }
+      const hint = 'Tips: (1) Enable "Skip Verification" to speed up the pipeline. (2) Use shorter material. (3) Paste text directly instead of uploading.';
       return res.status(422).json({
         success: false,
-        message: 'No questions could be generated from this material. AI providers may be slow or rate-limited. Try with shorter material or enable Skip Verification.',
+        message: `No questions could be generated. ${diagParts.join(' ')} ${hint}`,
         stats
       });
     }

@@ -1,13 +1,20 @@
 /**
- * Multi-AI Pipeline Orchestrator
+ * Multi-AI Pipeline Orchestrator — Intelligent Two-Phase Design
  *
- * Complete flow:
- *   Step 1 — Text extraction (caller is responsible; pass extractedText)
- *   Step 2 — Gemini: generates question + intended correct answer + topic/difficulty/explanation
- *   Step 3 — Groq: generates 3 plausible distractors for each question
- *   Step 4 — OpenRouter: independently verifies each assembled MCQ
- *   Step 5 — Backend validation: enforces schema rules + deduplication
- *   Step 6 — Return preview array ready for UI → Admin save → create room
+ * Phase 1 — UNDERSTAND (Gemini)
+ *   Each text chunk is passed to Gemini which extracts structured facts
+ *   (events, people, dates, numbers, schemes, relationships).
+ *   Facts from all chunks are merged into a shared "knowledge base".
+ *
+ * Phase 2 — GENERATE from knowledge (Gemini → Groq → OpenRouter)
+ *   The knowledge base is split into question-generation chunks.
+ *   Gemini generates intelligent, exam-oriented MCQs from the structured facts.
+ *   Groq adds three plausible distractors per question.
+ *   OpenRouter independently verifies correctness.
+ *   A deduplication layer removes near-duplicate questions.
+ *
+ * This mirrors how a competent human tutor works: read & understand first,
+ * then write questions — not mechanically convert lines into questions.
  *
  * AI keys are read from process.env only. Never hardcoded.
  *
@@ -21,12 +28,20 @@ import { generateDistractors } from './groq.js';
 import { verifyMCQ } from './openrouter.js';
 import { Question } from '../models/Question.js';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PIPELINE_TIMEOUT_MS = 110000; // 110 s hard ceiling
+const UNDERSTAND_CHUNK_SIZE = 5000; // chars per comprehension chunk (Phase 1)
+const UNDERSTAND_OVERLAP = 400;     // overlap between comprehension chunks (context preservation)
+const GENERATE_CHUNK_SIZE = 6000;   // chars of facts per generation chunk (Phase 2)
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function normalizeQuestionText(text = '') {
   return text
     .toLowerCase()
-    .replace(/[^\w\s]/gi, '')
+    // keep Devanagari + ASCII word chars
+    .replace(/[^\w\s\u0900-\u097F]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -35,13 +50,7 @@ function escapeRegex(str = '') {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * Shuffle an options array and track where the correct answer ended up.
- * Uses Fisher-Yates so correctAnswer is never predictably at index 0.
- * @param {string[]} options  — all 4 options (correct + 3 others)
- * @param {string}   correct  — the text of the correct answer
- * @returns {{ options: string[], correctIndex: number }}
- */
+/** Fisher-Yates shuffle; returns new index of `correct` after shuffle */
 function shufflePlaceholders(options, correct) {
   const arr = [...options];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -52,59 +61,192 @@ function shufflePlaceholders(options, correct) {
 }
 
 /**
- * Build a Gemini prompt for question+answer generation (no distractors).
- * Strict: only factual questions grounded in source text.
+ * Split text into overlapping chunks of roughly `size` chars.
+ * We split on sentence boundaries ('. ' or '\n') where possible.
  */
-function buildGeminiQAPrompt(chunkText, subject, topic, exam, difficulty, count, language) {
-  return `You are an expert MCQ question writer for Indian competitive exams (SSC CGL, Railway NTPC, UP Police, Banking).
+function splitIntoOverlappingChunks(text, size = UNDERSTAND_CHUNK_SIZE, overlap = UNDERSTAND_OVERLAP) {
+  if (text.length <= size) return [text];
 
-Source Material:
+  const chunks = [];
+  let start = 0;
+
+  while (start < text.length) {
+    let end = Math.min(start + size, text.length);
+
+    // Try to break at a sentence/line boundary near `end`
+    if (end < text.length) {
+      const sliceToSearch = text.slice(Math.max(end - 300, start), end);
+      const lastBreak = Math.max(
+        sliceToSearch.lastIndexOf('। '),   // Hindi danda
+        sliceToSearch.lastIndexOf('. '),
+        sliceToSearch.lastIndexOf('\n'),
+        sliceToSearch.lastIndexOf('? '),
+        sliceToSearch.lastIndexOf('! ')
+      );
+      if (lastBreak > 50) {
+        end = Math.max(end - 300, start) + lastBreak + 1;
+      }
+    }
+
+    chunks.push(text.slice(start, end).trim());
+    start = Math.max(start + 1, end - overlap); // move forward but keep overlap
+  }
+
+  return chunks.filter(c => c.length > 50);
+}
+
+/**
+ * Split a facts string into non-overlapping chunks for question generation.
+ */
+function splitFactsIntoChunks(facts, size = GENERATE_CHUNK_SIZE) {
+  if (facts.length <= size) return [facts];
+  const lines = facts.split('\n');
+  const chunks = [];
+  let current = '';
+  for (const line of lines) {
+    if ((current + '\n' + line).length > size && current) {
+      chunks.push(current.trim());
+      current = line;
+    } else {
+      current += (current ? '\n' : '') + line;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
+}
+
+// ─── Phase 1: Comprehension (Gemini) ─────────────────────────────────────────
+
+/**
+ * Ask Gemini to read a chunk of raw source text and extract structured facts.
+ * Returns a multi-line bullet list of facts in the target language.
+ * This is the "understanding" phase — no questions yet.
+ */
+async function extractFactsFromChunk(chunkText, subject, language, chunkIndex, totalChunks) {
+  const langInstruction =
+    language === 'hi'
+      ? 'तथ्यों को हिंदी (देवनागरी) में लिखें।'
+      : language === 'bilingual'
+      ? 'Write facts mixing Hindi and English naturally.'
+      : 'Write facts in English.';
+
+  const prompt = `You are an expert study assistant helping students prepare for Indian competitive exams (SSC CGL, Railway NTPC, UP Police, Banking, State PSC).
+
+You have been given a segment of study material (chunk ${chunkIndex + 1} of ${totalChunks}).
+Subject: ${subject}
+
+SOURCE TEXT:
 """
 ${chunkText}
 """
 
-Task: Extract exactly ${count} factual questions STRICTLY from the source material above.
-Subject: ${subject}
-Topic: ${topic}
-Exam: ${exam}
-Difficulty: ${difficulty}
-Language: ${language === 'hi' ? 'Generate questions and answers in Hindi (Devanagari script)' : language === 'bilingual' ? 'Generate questions mixing Hindi and English naturally as appropriate' : 'Generate questions in English'}
+Your task: Read and understand this material thoroughly. Extract ALL important facts, events, people, dates, statistics, schemes, organizations, laws, relationships, and concepts actually discussed in this text.
+
+Language instruction: ${langInstruction}
+
+Output format — write one fact per line, starting with a bullet (•). Be precise and specific:
+• [fact 1]
+• [fact 2]
+...
 
 Rules:
-1. Each question must be directly answerable from the source text.
-2. Do NOT invent facts not present in the source.
-3. If source does not contain ${count} distinct facts, return only what is available (fewer questions is better than invented questions).
-4. Each question needs ONLY the question text + one correct answer (NOT distractors — another AI will add those).
-5. Include: topic, difficulty (Easy/Medium/Hard), language (en/hi/bilingual), a short explanation citing the source.
+- Only extract facts explicitly present in the source text. Do NOT invent.
+- Include numbers, dates, names, and specific details exactly as stated.
+- If the text is conversational/lecture style, extract the information being taught, not the teaching dialogue itself.
+- If a topic is incomplete in this chunk, extract what is available and note it with "(continued in next segment)" if applicable.
+- Minimum 3 facts if any exist; do not output empty if the text contains information.
+- Do NOT generate questions yet. Only facts.`;
+
+  try {
+    const rawText = await executeGeminiPrompt(prompt, undefined, 30000, 1);
+    // Extract bullet lines
+    const lines = rawText.split('\n')
+      .map(l => l.trim())
+      .filter(l => l.startsWith('•') || l.startsWith('-') || l.startsWith('*'))
+      .map(l => l.replace(/^[•\-*]\s*/, '').trim())
+      .filter(l => l.length > 5);
+    return lines;
+  } catch (err) {
+    console.warn(`[Phase1] Fact extraction chunk ${chunkIndex + 1} failed: ${err.message}`);
+    return [];
+  }
+}
+
+// ─── Phase 2: Question Generation (Gemini) ───────────────────────────────────
+
+/**
+ * Build the question-generation prompt.
+ * Input is now structured facts (not raw source text), which Gemini handles
+ * far more reliably than conversational transcript prose.
+ */
+function buildQuestionGenerationPrompt(factsText, subject, topic, exam, difficulty, count, language, coveredTopics) {
+  const langInstruction =
+    language === 'hi'
+      ? 'प्रश्न और उत्तर हिंदी (देवनागरी) में लिखें।'
+      : language === 'bilingual'
+      ? 'Write questions naturally mixing Hindi and English as appropriate for competitive exams.'
+      : 'Write questions in English.';
+
+  const coveredHint = coveredTopics.size > 0
+    ? `\nAlready-covered topics (avoid duplicating): ${[...coveredTopics].slice(-20).join(', ')}`
+    : '';
+
+  return `You are an expert MCQ writer for Indian competitive exams (${exam || 'SSC CGL, Railway NTPC, UP Police, Banking'}).
+
+You have been given a set of VERIFIED FACTS from study material about "${subject}" — topic: "${topic}".
+
+FACTS:
+"""
+${factsText}
+"""
+${coveredHint}
+
+Task: Generate up to ${count} high-quality, exam-oriented MCQs based STRICTLY on these facts.
+Language: ${langInstruction}
+Difficulty: ${difficulty}
+
+Question types to include (where facts support them):
+- Direct factual (What/Who/When/Where/How many)
+- Conceptual (What does X mean / Why was Y done)
+- Statement-based (Which of the following is correct about X)
+- Relationship (X is related to Y in what way)
+
+Rules:
+1. Every question must be answerable from the facts above. Do NOT invent.
+2. Generate ONLY the question and ONE correct answer — NOT distractors (another AI adds those).
+3. Avoid near-duplicate questions. Each question must test a distinct fact.
+4. If fewer than ${count} good questions are possible from these facts, generate only the good ones.
+5. Include topic, difficulty, language, and a short explanation citing the fact.
+6. correctAnswer must be the exact text of the correct answer (not an index).
 
 Respond with ONLY valid JSON:
 {
   "questions": [
     {
       "question": "question text",
-      "correctAnswer": "the exact correct answer text (not index)",
-      "topic": "specific topic",
+      "correctAnswer": "exact correct answer text",
+      "topic": "specific sub-topic",
       "difficulty": "Easy|Medium|Hard",
       "language": "en|hi|bilingual",
-      "explanation": "brief factual explanation with source reference",
-      "sourceEvidence": "exact quote or paraphrase from source that supports this answer"
+      "explanation": "brief explanation citing the source fact",
+      "sourceEvidence": "the specific fact that supports this answer"
     }
   ]
 }`;
 }
 
-// ─── Step 2: Gemini Q+A Generation ───────────────────────────────────────────
-
-async function geminiGenerateQA(chunkText, subject, topic, exam, difficulty, countPerChunk = 5, language = 'en') {
-  const prompt = buildGeminiQAPrompt(chunkText, subject, topic, exam, difficulty, countPerChunk, language);
-  const rawText = await executeGeminiPrompt(prompt);
+async function geminiGenerateQA(factsText, subject, topic, exam, difficulty, count, language, coveredTopics) {
+  const prompt = buildQuestionGenerationPrompt(factsText, subject, topic, exam, difficulty, count, language, coveredTopics);
+  const rawText = await executeGeminiPrompt(prompt, undefined, 35000, 1);
 
   let parsed;
   try {
     const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-    parsed = JSON.parse(clean);
+    // Handle cases where Gemini wraps in extra text before/after JSON
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean);
   } catch {
-    throw new Error(`Gemini returned invalid JSON: ${rawText.substring(0, 200)}`);
+    throw new Error(`Gemini returned invalid JSON: ${rawText.substring(0, 300)}`);
   }
 
   if (!Array.isArray(parsed.questions)) {
@@ -117,25 +259,25 @@ async function geminiGenerateQA(chunkText, subject, topic, exam, difficulty, cou
   );
 }
 
-// ─── Step 3: Groq Distractor Generation ──────────────────────────────────────
+// ─── Groq: Distractor Generation ─────────────────────────────────────────────
 
-async function groqAddDistractors(qaItem, subject, sourceContext) {
+async function groqAddDistractors(qaItem, subject, contextHint) {
   const result = await generateDistractors(
     qaItem.question,
     qaItem.correctAnswer,
-    sourceContext,
+    contextHint || '',
     subject
   );
   return {
     ...qaItem,
     options: result.options,
-    correctAnswer: result.correctAnswer, // now a 0-indexed number
+    correctAnswer: result.correctAnswer,
     distractors: result.distractors,
     groqProvider: result.provider
   };
 }
 
-// ─── Step 4: OpenRouter Verification ─────────────────────────────────────────
+// ─── OpenRouter: Verification ────────────────────────────────────────────────
 
 async function openRouterVerify(mcqItem, subject) {
   try {
@@ -152,7 +294,6 @@ async function openRouterVerify(mcqItem, subject) {
       verifierVerdict: result.verdict,
       verifierConfidence: result.confidence,
       verifierReasoning: result.reasoning,
-      // If FAIL with HIGH confidence, correct the answer index
       correctAnswer:
         result.verdict === 'FAIL' && result.confidence === 'HIGH'
           ? result.correctAnswerIndex
@@ -161,7 +302,6 @@ async function openRouterVerify(mcqItem, subject) {
       openRouterProvider: result.provider
     };
   } catch (verifyErr) {
-    // Verification optional — don't block the pipeline
     console.warn(`[OpenRouter] Verification skipped for "${mcqItem.question.substring(0, 50)}": ${verifyErr.message}`);
     return {
       ...mcqItem,
@@ -173,7 +313,7 @@ async function openRouterVerify(mcqItem, subject) {
   }
 }
 
-// ─── Step 5: Backend Validation ───────────────────────────────────────────────
+// ─── Schema Validation ────────────────────────────────────────────────────────
 
 function validateMCQItem(q, subject, topic, exam) {
   if (!q.question || typeof q.question !== 'string' || q.question.trim().length < 5) return null;
@@ -201,7 +341,6 @@ function validateMCQItem(q, subject, topic, exam) {
     tags: [subject, q.topic || topic].filter(Boolean),
     verified: false,
     status: 'PENDING_REVIEW',
-    // Metadata for transparency
     _pipeline: {
       geminiQuestion: true,
       groqDistractors: q.groqProvider === 'groq',
@@ -212,45 +351,35 @@ function validateMCQItem(q, subject, topic, exam) {
   };
 }
 
-// ─── Main Pipeline ────────────────────────────────────────────────────────────
+// ─── Main Pipeline Export ─────────────────────────────────────────────────────
 
 /**
- * Run the full Gemini → Groq → OpenRouter → validate pipeline.
+ * Run the full two-phase intelligent pipeline.
  *
  * @param {object} opts
- *   opts.extractedText     {string}  — clean text from document or pasted input
- *   opts.subject           {string}
- *   opts.topic             {string}
- *   opts.exam              {string}
- *   opts.difficulty        {string}  — Easy|Medium|Hard|All
- *   opts.questionCount     {number}  — target number of questions (default 10)
- *   opts.sourceDocumentName {string} — display name for source
- *   opts.createdBy         {string}
- *   opts.skipGroq          {boolean} — skip Groq step (use Gemini fallback distractors)
- *   opts.skipVerification  {boolean} — skip OpenRouter step
+ *   opts.extractedText      {string}  — clean text from document or pasted input
+ *   opts.subject            {string}
+ *   opts.topic              {string}
+ *   opts.exam               {string}
+ *   opts.difficulty         {string}  Easy|Medium|Hard|All
+ *   opts.questionCount      {number}  target (no hard cap)
+ *   opts.language           {string}  en|hi|bilingual
+ *   opts.mode               {string}  quick|comprehensive
+ *   opts.sourceDocumentName {string}
+ *   opts.createdBy          {string}
+ *   opts.skipGroq           {boolean}
+ *   opts.skipVerification   {boolean}
  *
- * @returns {object}
- *   {
- *     questions: MCQ[],   // validated preview questions (NOT yet saved)
- *     stats: {
- *       geminiGenerated, groqSuccess, groqFailed,
- *       openRouterPass, openRouterFail, openRouterSkipped, openRouterCorrected,
- *       validationFailed, deduplicatedLocally, finalCount
- *     }
- *   }
+ * @returns {{ questions: MCQ[], stats: object }}
  */
-// ─── Pipeline-level timeout: prevents permanent hang if AI providers stall ─────
-const PIPELINE_TIMEOUT_MS = 110000; // 110 s — leaves headroom inside Render's 120 s proxy limit
-
 export const runDocToTestPipeline = async (opts) => {
   let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
     timeoutId = setTimeout(
-      () => reject(new Error('Pipeline timed out after 110 s. Return partial results or retry with fewer questions.')),
+      () => reject(new Error('Pipeline timed out after 110 s. Try "Skip Verification", shorter material, or fewer questions.')),
       PIPELINE_TIMEOUT_MS
     );
   });
-
   try {
     return await Promise.race([_runPipeline(opts), timeoutPromise]);
   } finally {
@@ -276,29 +405,15 @@ async function _runPipeline({
     throw new Error('No extracted text provided to pipeline.');
   }
 
-  // Split text into ~4000-char chunks
-  const CHUNK_SIZE = 4000;
-  const chunks = [];
-  const paragraphs = extractedText.trim().split(/\n\s*\n/);
-  let current = '';
-  for (const para of paragraphs) {
-    if ((current.length + para.length) <= CHUNK_SIZE) {
-      current += (current ? '\n\n' : '') + para;
-    } else {
-      if (current) chunks.push(current.trim());
-      current = para;
-    }
-  }
-  if (current.trim()) chunks.push(current.trim());
-  if (chunks.length === 0) chunks.push(extractedText.substring(0, CHUNK_SIZE));
-
-  // In comprehensive mode, ask Gemini to extract as many facts as possible from each chunk.
-  // In quick mode, spread questionCount evenly across chunks.
-  const questionsPerChunk = mode === 'comprehensive'
-    ? Math.max(5, Math.ceil(questionCount / Math.max(chunks.length, 1)))
-    : Math.max(1, Math.ceil(questionCount / chunks.length));
-
   const stats = {
+    phase: 'starting',
+    understandChunksTotal: 0,
+    understandChunksDone: 0,
+    understandChunksFailed: 0,
+    factsExtracted: 0,
+    generateChunksTotal: 0,
+    generateChunksDone: 0,
+    generateChunksFailed: 0,
     geminiGenerated: 0,
     groqSuccess: 0,
     groqFailed: 0,
@@ -308,34 +423,108 @@ async function _runPipeline({
     openRouterCorrected: 0,
     validationFailed: 0,
     deduplicatedLocally: 0,
-    finalCount: 0,
-    chunksTotal: chunks.length,
-    chunksProcessed: 0,
-    chunksFailed: 0
+    finalCount: 0
   };
+
+  // ══════════════════════════════════════════════════════════════════
+  // PHASE 1: UNDERSTAND — extract structured facts from raw text
+  // ══════════════════════════════════════════════════════════════════
+  stats.phase = 'understanding';
+
+  // Build overlapping comprehension chunks
+  const understandChunks = splitIntoOverlappingChunks(
+    extractedText.trim(),
+    UNDERSTAND_CHUNK_SIZE,
+    UNDERSTAND_OVERLAP
+  );
+  stats.understandChunksTotal = understandChunks.length;
+
+  console.log(`[Pipeline] Phase 1 — Understanding ${understandChunks.length} chunk(s) of source material...`);
+
+  const allFacts = [];
+
+  for (let ci = 0; ci < understandChunks.length; ci++) {
+    const chunk = understandChunks[ci];
+    console.log(`[Phase1] Chunk ${ci + 1}/${understandChunks.length} (${chunk.length} chars) — extracting facts...`);
+    const facts = await extractFactsFromChunk(chunk, subject, language, ci, understandChunks.length);
+    if (facts.length > 0) {
+      allFacts.push(...facts);
+      stats.understandChunksDone++;
+      console.log(`[Phase1] Chunk ${ci + 1}: ${facts.length} facts extracted`);
+    } else {
+      stats.understandChunksFailed++;
+      console.warn(`[Phase1] Chunk ${ci + 1}: no facts extracted`);
+    }
+
+    // In quick mode, stop Phase 1 early once we have enough raw material
+    // (a generous estimate: ~3 facts per question needed)
+    if (mode === 'quick' && allFacts.length >= questionCount * 3) {
+      console.log(`[Phase1] Quick mode: sufficient facts (${allFacts.length}) gathered. Stopping early.`);
+      break;
+    }
+  }
+
+  stats.factsExtracted = allFacts.length;
+
+  if (allFacts.length === 0) {
+    // Fall back: use raw text directly if fact extraction completely failed
+    console.warn('[Phase1] No facts extracted by Phase 1. Falling back to raw-text generation.');
+    return _runRawTextPipeline({ extractedText, subject, topic, exam, difficulty, questionCount, language, mode, sourceDocumentName, createdBy, skipGroq, skipVerification, stats });
+  }
+
+  // Deduplicate facts (case-insensitive)
+  const seenFacts = new Set();
+  const uniqueFacts = allFacts.filter(f => {
+    const norm = f.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (seenFacts.has(norm)) return false;
+    seenFacts.add(norm);
+    return true;
+  });
+
+  const knowledgeBase = uniqueFacts.map(f => `• ${f}`).join('\n');
+
+  console.log(`[Pipeline] Phase 1 complete. ${uniqueFacts.length} unique facts in knowledge base.`);
+
+  // ══════════════════════════════════════════════════════════════════
+  // PHASE 2: GENERATE — create MCQs from structured knowledge base
+  // ══════════════════════════════════════════════════════════════════
+  stats.phase = 'generating';
+
+  // Split knowledge base into generation chunks
+  const generateChunks = splitFactsIntoChunks(knowledgeBase, GENERATE_CHUNK_SIZE);
+  stats.generateChunksTotal = generateChunks.length;
+
+  // How many questions per generation chunk
+  const questionsPerChunk = mode === 'comprehensive'
+    ? Math.max(5, Math.ceil(questionCount / Math.max(generateChunks.length, 1)))
+    : Math.max(3, Math.ceil(questionCount / Math.max(generateChunks.length, 1)));
+
+  console.log(`[Pipeline] Phase 2 — Generating from ${generateChunks.length} knowledge chunk(s), ~${questionsPerChunk} Qs each...`);
 
   const assembled = [];
   const seenNorm = new Set();
+  const coveredTopics = new Set();
 
-  for (let ci = 0; ci < chunks.length; ci++) {
-    const chunkText = chunks[ci];
-    console.log(`[Pipeline] Chunk ${ci + 1}/${chunks.length} (${chunkText.length} chars) — requesting ${questionsPerChunk} Qs`);
+  for (let ci = 0; ci < generateChunks.length; ci++) {
+    const factsText = generateChunks[ci];
+    console.log(`[Phase2] Chunk ${ci + 1}/${generateChunks.length} (${factsText.length} chars facts) — requesting ${questionsPerChunk} Qs`);
 
-    // ── Step 2: Gemini ──
+    // ── Gemini: Generate Q+A from facts ──
     let qaItems = [];
     try {
-      qaItems = await geminiGenerateQA(chunkText, subject, topic, exam, difficulty, questionsPerChunk, language);
+      qaItems = await geminiGenerateQA(factsText, subject, topic, exam, difficulty, questionsPerChunk, language, coveredTopics);
       stats.geminiGenerated += qaItems.length;
-      stats.chunksProcessed++;
-      console.log(`[Pipeline] Gemini: ${qaItems.length} Q+A pairs from chunk ${ci + 1}`);
+      stats.generateChunksDone++;
+      qaItems.forEach(q => { if (q.topic) coveredTopics.add(q.topic); });
+      console.log(`[Phase2] Gemini: ${qaItems.length} Q+A pairs from chunk ${ci + 1}`);
     } catch (geminiErr) {
-      stats.chunksFailed++;
-      console.warn(`[Pipeline] Gemini chunk ${ci + 1} error: ${geminiErr.message}`);
+      stats.generateChunksFailed++;
+      console.warn(`[Phase2] Gemini chunk ${ci + 1} error: ${geminiErr.message}`);
       continue;
     }
 
     for (const qaItem of qaItems) {
-      // Dedup within batch
+      // Dedup
       const norm = normalizeQuestionText(qaItem.question);
       if (seenNorm.has(norm)) {
         stats.deduplicatedLocally++;
@@ -345,45 +534,28 @@ async function _runPipeline({
 
       let mcqWithOptions;
 
-      // ── Step 3: Groq ──
+      // ── Groq: Add distractors ──
       if (!skipGroq) {
         try {
-          mcqWithOptions = await groqAddDistractors(qaItem, subject, chunkText);
+          mcqWithOptions = await groqAddDistractors(qaItem, subject, factsText.substring(0, 600));
           stats.groqSuccess++;
-          console.log(`[Pipeline] Groq: distractors added for "${qaItem.question.substring(0, 40)}..."`);
         } catch (groqErr) {
           stats.groqFailed++;
-          console.warn(`[Pipeline] Groq failed for Q: "${qaItem.question.substring(0, 40)}": ${groqErr.message}`);
-          // Fallback: shuffle correct answer into a random position among placeholders
-          const rawOptions = [
-            qaItem.correctAnswer,
-            'Option B (review required)',
-            'Option C (review required)',
-            'Option D (review required)'
-          ];
-          const shuffled = shufflePlaceholders(rawOptions, qaItem.correctAnswer);
-          mcqWithOptions = {
-            ...qaItem,
-            options: shuffled.options,
-            correctAnswer: shuffled.correctIndex,
-            distractors: [],
-            groqProvider: 'fallback'
-          };
+          console.warn(`[Phase2] Groq failed: ${groqErr.message.substring(0, 100)}`);
+          // Fallback: placeholder distractors
+          const rawOpts = [qaItem.correctAnswer, 'इनमें से कोई नहीं / None of these', 'उपरोक्त सभी / All of the above', 'ज्ञात नहीं / Not mentioned'];
+          const shuffled = shufflePlaceholders(rawOpts, qaItem.correctAnswer);
+          mcqWithOptions = { ...qaItem, options: shuffled.options, correctAnswer: shuffled.correctIndex, distractors: [], groqProvider: 'fallback' };
         }
       } else {
-        // Skip Groq — shuffle correct answer into a random slot among placeholders
-        const rawOptions = [qaItem.correctAnswer, 'Option B', 'Option C', 'Option D'];
-        const shuffled = shufflePlaceholders(rawOptions, qaItem.correctAnswer);
-        mcqWithOptions = {
-          ...qaItem,
-          options: shuffled.options,
-          correctAnswer: shuffled.correctIndex
-        };
+        const rawOpts = [qaItem.correctAnswer, 'Option B', 'Option C', 'Option D'];
+        const shuffled = shufflePlaceholders(rawOpts, qaItem.correctAnswer);
+        mcqWithOptions = { ...qaItem, options: shuffled.options, correctAnswer: shuffled.correctIndex };
       }
 
       mcqWithOptions.sourceDocumentName = sourceDocumentName;
 
-      // ── Step 4: OpenRouter Verification ──
+      // ── OpenRouter: Verify ──
       let verifiedMcq;
       if (!skipVerification) {
         verifiedMcq = await openRouterVerify(mcqWithOptions, subject);
@@ -396,43 +568,139 @@ async function _runPipeline({
         stats.openRouterSkipped++;
       }
 
-      // ── Step 5: Validate schema ──
+      // ── Schema validation ──
       const validated = validateMCQItem(verifiedMcq, subject, topic, exam);
       if (!validated) {
         stats.validationFailed++;
-        console.warn(`[Pipeline] Schema validation failed for "${mcqWithOptions.question?.substring(0, 40)}"`);
         continue;
       }
 
       validated.createdBy = createdBy;
       assembled.push(validated);
 
-      // In 'quick' mode, stop as soon as we have enough questions
+      // Quick mode: stop once we have enough questions
       if (mode === 'quick' && assembled.length >= questionCount) break;
     }
 
-    // In 'quick' mode, stop processing further chunks once we have enough
     if (mode === 'quick' && assembled.length >= questionCount) break;
   }
 
   stats.finalCount = assembled.length;
-
+  stats.phase = 'complete';
   console.log(`[Pipeline] Complete. Stats:`, JSON.stringify(stats));
+
   return { questions: assembled, stats };
-};
+}
+
+// ─── Fallback: raw-text generation (used when Phase 1 produces zero facts) ───
+
+async function _runRawTextPipeline({
+  extractedText, subject, topic, exam, difficulty, questionCount,
+  language, mode, sourceDocumentName, createdBy, skipGroq, skipVerification, stats
+}) {
+  const CHUNK_SIZE = 4000;
+  const chunks = splitIntoOverlappingChunks(extractedText, CHUNK_SIZE, 300);
+  const questionsPerChunk = Math.max(3, Math.ceil(questionCount / Math.max(chunks.length, 1)));
+
+  const assembled = [];
+  const seenNorm = new Set();
+
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunkText = chunks[ci];
+
+    // Use a simpler prompt for raw text (original Phase 2 style)
+    const prompt = `You are an expert MCQ writer for Indian competitive exams.
+
+Source Material:
+"""
+${chunkText}
+"""
+
+Task: Generate up to ${questionsPerChunk} factual MCQs STRICTLY from the source above.
+Subject: ${subject}
+Language: ${language === 'hi' ? 'Hindi (Devanagari)' : language === 'bilingual' ? 'Hindi/English mixed' : 'English'}
+Difficulty: ${difficulty}
+
+Rules:
+1. Only use facts present in the source. Do NOT invent.
+2. Output question + one correct answer only (no distractors).
+3. If fewer than ${questionsPerChunk} good questions exist, output only the good ones.
+
+Respond ONLY valid JSON: { "questions": [{ "question": "...", "correctAnswer": "...", "topic": "...", "difficulty": "Easy|Medium|Hard", "language": "en|hi|bilingual", "explanation": "..." }] }`;
+
+    let qaItems = [];
+    try {
+      const rawText = await executeGeminiPrompt(prompt, undefined, 30000, 1);
+      const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const jsonMatch = clean.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean);
+      qaItems = (parsed.questions || []).filter(q =>
+        q.question?.trim().length > 5 && q.correctAnswer?.trim().length > 0
+      );
+      stats.geminiGenerated += qaItems.length;
+    } catch (err) {
+      console.warn(`[Fallback] Gemini chunk ${ci + 1} error: ${err.message}`);
+      continue;
+    }
+
+    for (const qaItem of qaItems) {
+      const norm = normalizeQuestionText(qaItem.question);
+      if (seenNorm.has(norm)) { stats.deduplicatedLocally++; continue; }
+      seenNorm.add(norm);
+
+      let mcqWithOptions;
+      if (!skipGroq) {
+        try {
+          mcqWithOptions = await groqAddDistractors(qaItem, subject, chunkText.substring(0, 600));
+          stats.groqSuccess++;
+        } catch {
+          stats.groqFailed++;
+          const rawOpts = [qaItem.correctAnswer, 'Option B (review)', 'Option C (review)', 'Option D (review)'];
+          const shuffled = shufflePlaceholders(rawOpts, qaItem.correctAnswer);
+          mcqWithOptions = { ...qaItem, options: shuffled.options, correctAnswer: shuffled.correctIndex, distractors: [] };
+        }
+      } else {
+        const rawOpts = [qaItem.correctAnswer, 'Option B', 'Option C', 'Option D'];
+        const shuffled = shufflePlaceholders(rawOpts, qaItem.correctAnswer);
+        mcqWithOptions = { ...qaItem, options: shuffled.options, correctAnswer: shuffled.correctIndex };
+      }
+
+      mcqWithOptions.sourceDocumentName = sourceDocumentName;
+
+      let verifiedMcq;
+      if (!skipVerification) {
+        verifiedMcq = await openRouterVerify(mcqWithOptions, subject);
+        if (verifiedMcq.verifierVerdict === 'PASS') stats.openRouterPass++;
+        else if (verifiedMcq.verifierVerdict === 'FAIL') stats.openRouterFail++;
+        else stats.openRouterSkipped++;
+        if (verifiedMcq.verifierCorrected) stats.openRouterCorrected++;
+      } else {
+        verifiedMcq = { ...mcqWithOptions, verifierVerdict: 'SKIPPED' };
+        stats.openRouterSkipped++;
+      }
+
+      const validated = validateMCQItem(verifiedMcq, subject, topic, exam);
+      if (!validated) { stats.validationFailed++; continue; }
+
+      validated.createdBy = createdBy;
+      assembled.push(validated);
+
+      if (mode === 'quick' && assembled.length >= questionCount) break;
+    }
+    if (mode === 'quick' && assembled.length >= questionCount) break;
+  }
+
+  stats.finalCount = assembled.length;
+  stats.phase = 'complete';
+  console.log(`[Pipeline/Fallback] Complete. Stats:`, JSON.stringify(stats));
+  return { questions: assembled, stats };
+}
 
 // ─── Save Validated Questions to MongoDB ─────────────────────────────────────
 
 /**
  * Save a preview batch to MongoDB Question collection.
  * Skips exact-text duplicates already in DB.
- *
- * @param {object[]} questions  — validated MCQ objects from runDocToTestPipeline
- * @param {object} opts
- *   opts.createdBy   {string}
- *   opts.status      {string}   — 'PENDING_REVIEW' or 'PUBLISHED'
- *
- * @returns {{ saved: number, skipped: number, errors: string[] }}
  */
 export const validateAndSaveQuestions = async (questions, { createdBy = 'Admin', status = 'PENDING_REVIEW' } = {}) => {
   let saved = 0;
@@ -441,7 +709,6 @@ export const validateAndSaveQuestions = async (questions, { createdBy = 'Admin',
 
   for (const q of questions) {
     try {
-      // Check for existing question with same text (case-insensitive)
       const existing = await Question.findOne({
         question: { $regex: new RegExp(`^${escapeRegex(q.question.trim())}$`, 'i') }
       });
