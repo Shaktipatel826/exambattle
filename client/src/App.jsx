@@ -30,6 +30,7 @@ const AppContent = () => {
   const [customTestConfig, setCustomTestConfig] = useState(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [battleSocket, setBattleSocket] = useState(null);
+  const [socketConnected, setSocketConnected] = useState(false);
   const socketRef = useRef(null);
 
   // Shared Socket.io connection for CreateTestPage and SavedTestsPage
@@ -39,25 +40,57 @@ const AppContent = () => {
         socketRef.current.disconnect();
         socketRef.current = null;
         setBattleSocket(null);
+        setSocketConnected(false);
       }
       return;
     }
     import('socket.io-client').then(({ io }) => {
+      // Disconnect any existing socket cleanly
       if (socketRef.current) socketRef.current.disconnect();
-      const s = io(window.location.origin, {
+
+      // Determine backend URL:
+      //   • In development (Vite proxy), connect to window.location.origin (proxied to :5000)
+      //   • In production (Render single-service), connect to window.location.origin
+      //   Both cases are identical — origin always reaches the correct backend.
+      const socketURL = window.location.origin;
+
+      const s = io(socketURL, {
         auth: { token },
-        transports: ['websocket'],
+        // Allow polling → websocket upgrade (DO NOT force websocket-only —
+        // Render's free-tier proxy can block raw WS on first handshake)
+        transports: ['polling', 'websocket'],
         reconnection: true,
-        reconnectionDelay: 2000
+        reconnectionDelay: 2000,
+        reconnectionAttempts: 10,
+        timeout: 20000,
       });
+
+      s.on('connect', () => {
+        console.log('[Socket] Connected:', s.id);
+        setSocketConnected(true);
+      });
+
+      s.on('disconnect', (reason) => {
+        console.warn('[Socket] Disconnected:', reason);
+        setSocketConnected(false);
+      });
+
+      s.on('connect_error', (err) => {
+        console.error('[Socket] Connection error:', err.message);
+        setSocketConnected(false);
+      });
+
       socketRef.current = s;
       setBattleSocket(s);
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error('[Socket] Failed to load socket.io-client:', err);
+    });
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
         setBattleSocket(null);
+        setSocketConnected(false);
       }
     };
   }, [user?.id, token]);
@@ -214,6 +247,7 @@ const AppContent = () => {
             user={user}
             onNavigate={handleNavigate}
             socket={battleSocket}
+            socketConnected={socketConnected}
           />
         )}
 
@@ -223,6 +257,7 @@ const AppContent = () => {
             user={user}
             onNavigate={handleNavigate}
             socket={battleSocket}
+            socketConnected={socketConnected}
           />
         )}
 

@@ -1,16 +1,24 @@
 /**
  * SavedTestsPage — Personal saved tests library.
  * Actions per test: Preview, Create Room (battle), Delete.
+ *
+ * Socket handling:
+ *  - Accepts both `socket` (the io() instance) and `socketConnected` (boolean)
+ *    from App.jsx so we can distinguish:
+ *      • socket null            → still loading (show spinner, not error)
+ *      • socket exists + !connected → reconnecting (show amber warning, retry)
+ *      • socket exists + connected  → ready to emit
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen, Swords, Trash2, Eye, Loader2, Plus, AlertCircle,
-  CheckCircle2, Calendar, HelpCircle, Cpu, ChevronDown, ChevronUp
+  CheckCircle2, Calendar, HelpCircle, Cpu, ChevronDown, ChevronUp,
+  Wifi, WifiOff, RefreshCw
 } from 'lucide-react';
 
 const LANG_LABELS = { en: 'English', hi: 'Hindi', bilingual: 'Bilingual' };
 
-export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
+export const SavedTestsPage = ({ token, user, onNavigate, socket, socketConnected }) => {
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -22,7 +30,11 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
   const [creatingRoom, setCreatingRoom] = useState(null);
   const [roomResults, setRoomResults] = useState({});
 
-  const fetchTests = async () => {
+  // Derive connected state: if socketConnected prop provided use it,
+  // otherwise fall back to socket?.connected for backward compatibility
+  const isSocketReady = socketConnected ?? (socket?.connected ?? false);
+
+  const fetchTests = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -37,9 +49,9 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
-  useEffect(() => { fetchTests(); }, [token]); // re-fetch if token changes (re-login)
+  useEffect(() => { fetchTests(); }, [fetchTests]);
 
   const handleDelete = async (testId) => {
     setDeleting(true);
@@ -83,10 +95,23 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
   };
 
   const handleCreateRoom = (test) => {
+    // Guard: socket object not yet loaded (async import still in progress)
     if (!socket) {
-      setRoomResults(prev => ({ ...prev, [test._id]: { error: 'Socket not connected. Please refresh.' } }));
+      setRoomResults(prev => ({
+        ...prev,
+        [test._id]: { error: 'Connecting to server… please wait a moment and try again.' }
+      }));
       return;
     }
+    // Guard: socket loaded but not connected yet (reconnecting)
+    if (!isSocketReady) {
+      setRoomResults(prev => ({
+        ...prev,
+        [test._id]: { error: 'Reconnecting to server… please wait a few seconds and try again.' }
+      }));
+      return;
+    }
+
     setCreatingRoom(test._id);
     setRoomResults(prev => ({ ...prev, [test._id]: {} }));
 
@@ -100,7 +125,10 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
         setRoomResults(prev => ({ ...prev, [test._id]: { code: ack.roomCode } }));
         if (onNavigate) onNavigate('BATTLE', { joinRoomCode: ack.roomCode });
       } else {
-        setRoomResults(prev => ({ ...prev, [test._id]: { error: ack?.message || 'Room creation failed.' } }));
+        setRoomResults(prev => ({
+          ...prev,
+          [test._id]: { error: ack?.message || 'Room creation failed. Please try again.' }
+        }));
       }
     });
   };
@@ -137,7 +165,7 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
           </div>
           <div>
             <h1 className="text-lg font-black text-[#252525]">Saved Tests</h1>
-            <p className="text-xs text-[#66635D]">Your personal AI-generated test library</p>
+            <p className="text-xs text-[#66635D]">Your personal test library</p>
           </div>
         </div>
         <button onClick={() => onNavigate?.('CREATE_TEST')}
@@ -146,11 +174,28 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
         </button>
       </div>
 
-      {/* Error */}
+      {/* Socket connection status banner */}
+      {socket && !isSocketReady && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs">
+          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+          <span>Connecting to battle server… Battle Room creation will be available shortly.</span>
+        </div>
+      )}
+      {socket && isSocketReady && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-green-700 text-xs">
+          <Wifi className="w-3.5 h-3.5 shrink-0" />
+          <span>Battle server connected — ready to create rooms.</span>
+        </div>
+      )}
+
+      {/* API error */}
       {error && (
         <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{error}</span>
+          <button onClick={fetchTests} className="ml-auto flex items-center gap-1 underline font-semibold">
+            <RefreshCw className="w-3 h-3" /> Retry
+          </button>
         </div>
       )}
 
@@ -176,6 +221,7 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
         <div className="space-y-3">
           {tests.map(test => {
             const roomRes = roomResults[test._id] || {};
+            const isCreating = creatingRoom === test._id;
             return (
               <div key={test._id} className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl shadow-sm overflow-hidden">
 
@@ -230,15 +276,25 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
                           ? <ChevronUp className="w-4 h-4" />
                           : <Eye className="w-4 h-4" />}
                       </button>
+
+                      {/* Battle button — shows spinner while connecting or creating */}
                       <button
                         onClick={() => handleCreateRoom(test)}
-                        disabled={creatingRoom === test._id}
-                        className="flex items-center gap-1 px-3 py-2 bg-[#244A73] text-white text-xs font-bold rounded-lg hover:bg-[#1a3a5c] disabled:opacity-50 transition-colors">
-                        {creatingRoom === test._id
+                        disabled={isCreating}
+                        title={!isSocketReady ? 'Connecting to battle server…' : 'Create Battle Room'}
+                        className={`flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 ${
+                          isSocketReady
+                            ? 'bg-[#244A73] hover:bg-[#1a3a5c] text-white'
+                            : 'bg-amber-500 hover:bg-amber-600 text-white'
+                        }`}>
+                        {isCreating
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          : <Swords className="w-3.5 h-3.5" />}
-                        Battle
+                          : isSocketReady
+                          ? <Swords className="w-3.5 h-3.5" />
+                          : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                        {isSocketReady ? 'Battle' : 'Connecting…'}
                       </button>
+
                       <button
                         onClick={() => setDeleteConfirm(test._id)}
                         className="p-2 rounded-lg border border-[#E2DACB] text-[#66635D] hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-colors">
@@ -255,8 +311,17 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
                     </div>
                   )}
                   {roomRes.error && (
-                    <div className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">
+                    <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 flex items-center gap-2">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                       {roomRes.error}
+                      {/* Offer a retry once socket is ready */}
+                      {isSocketReady && (
+                        <button
+                          onClick={() => handleCreateRoom(test)}
+                          className="ml-auto font-bold underline whitespace-nowrap">
+                          Retry
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -275,18 +340,30 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket }) => {
                             <p className="font-semibold text-[#252525] mb-2">
                               <span className="text-[#244A73] font-bold">Q{qi + 1}.</span> {q.question}
                             </p>
-                            <div className="grid grid-cols-2 gap-1">
-                              {q.options?.map((opt, oi) => (
-                                <div key={oi}
-                                  className={`px-2 py-1 rounded-lg border text-[11px] ${
-                                    oi === q.correctAnswer
-                                      ? 'bg-green-50 border-green-200 text-green-800 font-semibold'
-                                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
-                                  }`}>
-                                  <span className="font-bold">{String.fromCharCode(65 + oi)})</span> {opt}
-                                </div>
-                              ))}
-                            </div>
+                            {/* Short-answer: show reference answer */}
+                            {q.questionType === 'short_answer' ? (
+                              <div className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-green-50 border border-green-200 text-[11px] text-green-800">
+                                <CheckCircle2 className="w-3 h-3 shrink-0 mt-0.5 text-green-600" />
+                                <span><strong>Answer:</strong> {q.referenceAnswer}</span>
+                              </div>
+                            ) : (
+                              /* MCQ: show options */
+                              <div className="grid grid-cols-2 gap-1">
+                                {q.options?.map((opt, oi) => (
+                                  <div key={oi}
+                                    className={`px-2 py-1 rounded-lg border text-[11px] ${
+                                      oi === q.correctAnswer
+                                        ? 'bg-green-50 border-green-200 text-green-800 font-semibold'
+                                        : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
+                                    }`}>
+                                    <span className="font-bold">{String.fromCharCode(65 + oi)})</span> {opt}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {q.explanation && (
+                              <p className="mt-1.5 text-[10px] text-[#66635D] italic">{q.explanation}</p>
+                            )}
                           </div>
                         ))}
                       </div>

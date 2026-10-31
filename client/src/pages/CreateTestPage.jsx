@@ -78,7 +78,7 @@ function VerdictBadge({ verdict }) {
   );
 }
 
-export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
+export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnected }) => {
   // ─── Mode ─────────────────────────────────────────────────────────────────
   const [activeMode, setActiveMode] = useState('paste'); // 'paste' | 'ai'
 
@@ -429,10 +429,19 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
   // ─── Create Room ──────────────────────────────────────────────────────────
   const handleCreateRoom = () => {
     if (questions.length === 0) return;
+
+    // Derive connected state from prop (preferred) or socket.connected (fallback)
+    const isSocketReady = socketConnected ?? (socket?.connected ?? false);
+
     if (!socket) {
-      setRoomError('Socket not connected. Please refresh and try again.');
+      setRoomError('Connecting to server… please wait a moment and try again.');
       return;
     }
+    if (!isSocketReady) {
+      setRoomError('Reconnecting to battle server… please wait a few seconds and try again.');
+      return;
+    }
+
     setCreatingRoom(true);
     setRoomError('');
     setRoomCode(null);
@@ -1168,7 +1177,7 @@ Answer: Chandragupta Maurya"
             )}
 
             <button type="button" onClick={handleCreateRoom}
-              disabled={creatingRoom || questions.length === 0 || !socket}
+              disabled={creatingRoom || questions.length === 0}
               className="flex items-center gap-1.5 px-4 py-2.5 bg-[#244A73] text-white text-xs font-bold rounded-xl hover:bg-[#1a3a5c] disabled:opacity-50 transition-colors">
               {creatingRoom ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Swords className="w-3.5 h-3.5" />}
               {creatingRoom ? 'Creating Room…' : 'Create Room'}
