@@ -5,9 +5,15 @@
  * Battle flow:
  *  1. Student clicks Battle → Question Count Selector modal opens.
  *  2. Student picks a preset (10 / 20 / 30 / 50) or enters a custom number.
- *  3. Confirm → self-contained socket emits create_room_from_saved_test with
- *     the chosen count. Server does Fisher-Yates random sampling server-side.
- *  4. All players in the same room receive the identical randomly-sampled set.
+ *  3. Confirm → navigates to MultiplayerBattlePage with savedTestMeta.
+ *  4. MultiplayerBattlePage uses its OWN persistent socket to call
+ *     create_room_from_saved_test. Server does Fisher-Yates random sampling.
+ *  5. All players in the same room receive the identical randomly-sampled set.
+ *
+ * WHY: The old approach (temp socket) caused "Could not connect" on Render because:
+ *  a) The temp socket's WebSocket upgrade often fails on first attempt on Render.
+ *  b) Even if it succeeded, disconnect() killed the socketId stored in the room,
+ *     breaking the player.socketId security checks in start_battle/submit_answer.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -15,7 +21,6 @@ import {
   CheckCircle2, Calendar, HelpCircle, Cpu, ChevronDown, ChevronUp,
   RefreshCw, Shuffle, X
 } from 'lucide-react';
-import { getSocketUrl } from '../lib/apiConfig';
 
 const LANG_LABELS = { en: 'English', hi: 'Hindi', bilingual: 'Bilingual' };
 const QUICK_COUNTS = [10, 20, 30, 50];
@@ -177,7 +182,7 @@ const QuestionCountModal = ({ test, onConfirm, onClose }) => {
 };
 
 // ── Main Page ────────────────────────────────────────────────────────────────
-export const SavedTestsPage = ({ token, user, onNavigate }) => {
+export const SavedTestsPage = ({ token, user, onNavigate, battleSocket, socketConnected }) => {
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -186,8 +191,6 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [creatingRoom, setCreatingRoom] = useState(null);   // testId while socket is working
-  const [roomResults, setRoomResults] = useState({});
   // Question count selector: stores the test object when modal is open
   const [battleSetup, setBattleSetup] = useState(null);
 
@@ -253,92 +256,29 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
 
   // Opens the question count selector modal
   const openBattleSetup = (test) => {
-    setRoomResults(prev => ({ ...prev, [test._id]: {} }));
     setBattleSetup(test);
   };
 
-  // Called when student confirms count in the modal
-  const handleCreateRoom = async (test, questionCount) => {
+  // Called when student confirms count in the modal.
+  // Instead of creating a temporary socket (which fails on Render due to the socket ID
+  // becoming stale after disconnect), we navigate to MultiplayerBattlePage and pass the
+  // savedTestMeta. MultiplayerBattlePage uses its own persistent socket to create the room
+  // — exactly the same mechanism as MCQ Battle. This eliminates the dead-socketId bug.
+  const handleCreateRoom = (test, questionCount) => {
     setBattleSetup(null);
-    setCreatingRoom(test._id);
-    setRoomResults(prev => ({ ...prev, [test._id]: {} }));
-
-    let tempSocket = null;
-    let timedOut = false;
-
-    const cleanup = () => {
-      if (tempSocket) {
-        tempSocket.off('connect');
-        tempSocket.disconnect();
-        tempSocket = null;
-      }
-    };
-
-    try {
-      const { io } = await import('socket.io-client');
-      tempSocket = io(getSocketUrl(), {
-        transports: ['websocket', 'polling'],
-        timeout: 10000,
-        reconnection: false,
-      });
-
-      const timeoutId = setTimeout(() => {
-        timedOut = true;
-        cleanup();
-        setCreatingRoom(null);
-        setRoomResults(prev => ({
-          ...prev,
-          [test._id]: { error: 'Could not connect to battle server. Please try again.' }
-        }));
-      }, 12000);
-
-      const doCreate = () => {
-        if (timedOut) return;
-        tempSocket.emit('create_room_from_saved_test', {
-          user: { id: user?.id || user?._id, name: user?.name },
+    if (onNavigate) {
+      onNavigate('BATTLE', {
+        savedTestMeta: {
           savedTestId: test._id,
+          testTitle: test.title,
+          questionCount,
           config: {
             questionCount,
             timeLimitMinutes: Math.max(5, Math.ceil(questionCount * 1.5)),
             negativeMarking: 0.25,
           }
-        }, (ack) => {
-          clearTimeout(timeoutId);
-          cleanup();
-          setCreatingRoom(null);
-          if (ack?.success) {
-            setRoomResults(prev => ({ ...prev, [test._id]: { code: ack.roomCode } }));
-            if (onNavigate) onNavigate('BATTLE', { joinRoomCode: ack.roomCode });
-          } else {
-            setRoomResults(prev => ({
-              ...prev,
-              [test._id]: { error: ack?.message || 'Room creation failed. Please try again.' }
-            }));
-          }
-        });
-      };
-
-      if (tempSocket.connected) {
-        doCreate();
-      } else {
-        tempSocket.once('connect', doCreate);
-        tempSocket.once('connect_error', (err) => {
-          if (timedOut) return;
-          clearTimeout(timeoutId);
-          cleanup();
-          setCreatingRoom(null);
-          setRoomResults(prev => ({
-            ...prev,
-            [test._id]: { error: `Connection error: ${err.message}. Please try again.` }
-          }));
-        });
-      }
-    } catch (err) {
-      setCreatingRoom(null);
-      setRoomResults(prev => ({
-        ...prev,
-        [test._id]: { error: err.message }
-      }));
+        }
+      });
     }
   };
 
@@ -424,8 +364,6 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
         /* Test list */
         <div className="space-y-3">
           {tests.map(test => {
-            const roomRes = roomResults[test._id] || {};
-            const isCreating = creatingRoom === test._id;
             return (
               <div key={test._id} className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl shadow-sm overflow-hidden">
 
@@ -484,13 +422,10 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
                       {/* Battle button — opens question count picker */}
                       <button
                         onClick={() => openBattleSetup(test)}
-                        disabled={isCreating}
                         title="Select questions and create Battle Room"
-                        className="flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 bg-[#244A73] hover:bg-[#1a3a5c] text-white">
-                        {isCreating
-                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          : <Swords className="w-3.5 h-3.5" />}
-                        {isCreating ? 'Creating…' : 'Battle'}
+                        className="flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-lg transition-colors bg-[#244A73] hover:bg-[#1a3a5c] text-white">
+                        <Swords className="w-3.5 h-3.5" />
+                        Battle
                       </button>
 
                       <button
@@ -500,25 +435,6 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
                       </button>
                     </div>
                   </div>
-
-                  {/* Room result feedback */}
-                  {roomRes.code && (
-                    <div className="mt-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 flex items-center gap-2">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Room <strong>{roomRes.code}</strong> created — navigating to Battle…
-                    </div>
-                  )}
-                  {roomRes.error && (
-                    <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 flex items-center gap-2">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      {roomRes.error}
-                      <button
-                        onClick={() => openBattleSetup(test)}
-                        className="ml-auto font-bold underline whitespace-nowrap">
-                        Retry
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {/* Preview panel */}

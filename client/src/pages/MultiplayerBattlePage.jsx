@@ -21,7 +21,7 @@ const SUBJECTS = [
   'General Studies',
 ];
 
-export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCodeConsumed }) => {
+export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestMeta, onRoomCodeConsumed }) => {
   const [socket, setSocket] = useState(null);
   const [roomCodeInput, setRoomCodeInput] = useState(initialRoomCode || '');
   const [roomState, setRoomState] = useState(null);
@@ -121,6 +121,39 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
       return () => socket.off('connect', doJoin);
     }
   }, [socket, initialRoomCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-create room from Saved Test (navigated from SavedTestsPage) ─────────
+  // Uses THIS page's own persistent socket — no temp socket, no dead socketId bug.
+  useEffect(() => {
+    if (!socket || !savedTestMeta || !user) return;
+    if (roomState) return; // already in a room
+
+    const doCreate = () => {
+      console.log('[Battle] Creating room from saved test via persistent socket:', savedTestMeta);
+      setError('');
+      socket.emit('create_room_from_saved_test', {
+        user: { id: user?.id || user?._id, name: user?.name },
+        savedTestId: savedTestMeta.savedTestId,
+        config: savedTestMeta.config,
+      }, (response) => {
+        console.log('[Battle] create_room_from_saved_test ack:', response);
+        if (response?.success) {
+          setRoomState(response.room);
+          setRoomCodeInput(response.roomCode);
+        } else {
+          setError(response?.message || 'Failed to create battle room from saved test. Please try again.');
+        }
+        if (onRoomCodeConsumed) onRoomCodeConsumed();
+      });
+    };
+
+    if (socket.connected) {
+      doCreate();
+    } else {
+      socket.once('connect', doCreate);
+      return () => socket.off('connect', doCreate);
+    }
+  }, [socket, savedTestMeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Server-Authoritative Countdown ─────────────────────────────────────────
   useEffect(() => {
@@ -318,6 +351,22 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
   // VIEW 1: Room Setup (Create / Join)
   // ═══════════════════════════════════════════════════════════════════════════
   if (!roomState) {
+    // If navigated from SavedTestsPage, show a "Setting up room…" card while socket creates it
+    if (savedTestMeta && !error) {
+      return (
+        <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+          <div className="bg-[#FFFDF8] p-10 rounded-2xl border border-[#E2DACB] shadow-sm text-center space-y-4">
+            <Loader2 className="w-10 h-10 text-[#244A73] animate-spin mx-auto" />
+            <h2 className="text-lg font-black text-[#252525]">Setting up your Battle Room…</h2>
+            <p className="text-sm text-[#66635D]">
+              Randomly selecting <strong>{savedTestMeta.questionCount}</strong> questions from <em>{savedTestMeta.testTitle}</em>
+            </p>
+            <p className="text-xs text-[#66635D]">Connecting to battle server. This will only take a moment.</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
 

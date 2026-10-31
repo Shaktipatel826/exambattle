@@ -115,10 +115,15 @@ const AppContent = () => {
   };
 
   const [battleJoinCode, setBattleJoinCode] = useState(null);
+  const [savedTestMeta, setSavedTestMeta] = useState(null); // { savedTestId, questionCount, config }
 
   const handleNavigate = (tab, params) => {
     if (tab === 'BATTLE' && params?.joinRoomCode) {
       setBattleJoinCode(params.joinRoomCode);
+    }
+    if (tab === 'BATTLE' && params?.savedTestMeta) {
+      setSavedTestMeta(params.savedTestMeta);
+      setBattleJoinCode(null); // not pre-joining, MultiplayerBattlePage will create the room
     }
     setActiveTab(tab);
   };
@@ -235,7 +240,8 @@ const AppContent = () => {
             token={token}
             user={user}
             initialRoomCode={battleJoinCode}
-            onRoomCodeConsumed={() => setBattleJoinCode(null)}
+            savedTestMeta={savedTestMeta}
+            onRoomCodeConsumed={() => { setBattleJoinCode(null); setSavedTestMeta(null); }}
           />
         )}
 
@@ -270,6 +276,8 @@ const AppContent = () => {
             token={token}
             user={user}
             onNavigate={handleNavigate}
+            battleSocket={battleSocket}
+            socketConnected={socketConnected}
           />
         )}
 
