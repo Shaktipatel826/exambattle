@@ -9,7 +9,7 @@
  *      • socket exists + !connected → reconnecting (show amber warning, retry)
  *      • socket exists + connected  → ready to emit
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   BookOpen, Swords, Trash2, Eye, Loader2, Plus, AlertCircle,
   CheckCircle2, Calendar, HelpCircle, Cpu, ChevronDown, ChevronUp,
@@ -29,10 +29,22 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket, socketConnecte
   const [deleting, setDeleting] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(null);
   const [roomResults, setRoomResults] = useState({});
+  // After 15 s of waiting, stop showing "Connecting…" and show a hard error instead
+  const [socketTimedOut, setSocketTimedOut] = useState(false);
 
-  // Derive connected state: if socketConnected prop provided use it,
-  // otherwise fall back to socket?.connected for backward compatibility
+  // Derive connected state: prefer the prop (updated by App.jsx events),
+  // fall back to socket.connected for backward compatibility.
   const isSocketReady = socketConnected ?? (socket?.connected ?? false);
+
+  // Start a 15-second countdown the moment the page mounts.
+  // If the socket hasn't connected by then, mark it as timed-out.
+  useEffect(() => {
+    if (isSocketReady) { setSocketTimedOut(false); return; }
+    const t = setTimeout(() => {
+      if (!isSocketReady) setSocketTimedOut(true);
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [isSocketReady]);
 
   const fetchTests = useCallback(async () => {
     setLoading(true);
@@ -95,7 +107,7 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket, socketConnecte
   };
 
   const handleCreateRoom = (test) => {
-    // Guard: socket object not yet loaded (async import still in progress)
+    // Guard: socket object not yet loaded
     if (!socket) {
       setRoomResults(prev => ({
         ...prev,
@@ -103,11 +115,15 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket, socketConnecte
       }));
       return;
     }
-    // Guard: socket loaded but not connected yet (reconnecting)
+    // Guard: socket loaded but not connected (reconnecting or timed out)
     if (!isSocketReady) {
       setRoomResults(prev => ({
         ...prev,
-        [test._id]: { error: 'Reconnecting to server… please wait a few seconds and try again.' }
+        [test._id]: {
+          error: socketTimedOut
+            ? 'Could not connect to the battle server. Please refresh the page and try again.'
+            : 'Reconnecting to battle server… please wait a few seconds and try again.'
+        }
       }));
       return;
     }
@@ -175,10 +191,20 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket, socketConnecte
       </div>
 
       {/* Socket connection status banner */}
-      {socket && !isSocketReady && (
+      {socket && !isSocketReady && !socketTimedOut && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs">
           <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
           <span>Connecting to battle server… Battle Room creation will be available shortly.</span>
+        </div>
+      )}
+      {socket && !isSocketReady && socketTimedOut && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" />
+          <span>Could not connect to the battle server.</span>
+          <button onClick={() => window.location.reload()}
+            className="ml-auto flex items-center gap-1 font-bold underline whitespace-nowrap">
+            <RefreshCw className="w-3 h-3" /> Refresh page
+          </button>
         </div>
       )}
       {socket && isSocketReady && (
@@ -281,18 +307,29 @@ export const SavedTestsPage = ({ token, user, onNavigate, socket, socketConnecte
                       <button
                         onClick={() => handleCreateRoom(test)}
                         disabled={isCreating}
-                        title={!isSocketReady ? 'Connecting to battle server…' : 'Create Battle Room'}
+                        title={
+                          isSocketReady ? 'Create Battle Room'
+                          : socketTimedOut ? 'Connection failed — refresh page'
+                          : 'Connecting to battle server…'
+                        }
                         className={`flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 ${
                           isSocketReady
                             ? 'bg-[#244A73] hover:bg-[#1a3a5c] text-white'
+                            : socketTimedOut
+                            ? 'bg-red-500 hover:bg-red-600 text-white'
                             : 'bg-amber-500 hover:bg-amber-600 text-white'
                         }`}>
                         {isCreating
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           : isSocketReady
                           ? <Swords className="w-3.5 h-3.5" />
+                          : socketTimedOut
+                          ? <WifiOff className="w-3.5 h-3.5" />
                           : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                        {isSocketReady ? 'Battle' : 'Connecting…'}
+                        {isCreating ? 'Creating…'
+                          : isSocketReady ? 'Battle'
+                          : socketTimedOut ? 'Offline'
+                          : 'Connecting…'}
                       </button>
 
                       <button

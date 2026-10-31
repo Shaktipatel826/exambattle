@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
+import { getSocketUrl } from './lib/apiConfig';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigation } from './components/Navigation';
 import { PublicHomePage } from './pages/PublicHomePage';
@@ -33,7 +35,9 @@ const AppContent = () => {
   const [socketConnected, setSocketConnected] = useState(false);
   const socketRef = useRef(null);
 
-  // Shared Socket.io connection for CreateTestPage and SavedTestsPage
+  // Shared Socket.io connection for CreateTestPage and SavedTestsPage.
+  // Uses the same getSocketUrl() helper and transport order as MultiplayerBattlePage
+  // so the connection behaviour is identical to the working Battle page.
   useEffect(() => {
     if (!user || !token) {
       if (socketRef.current) {
@@ -44,54 +48,64 @@ const AppContent = () => {
       }
       return;
     }
-    import('socket.io-client').then(({ io }) => {
-      // Disconnect any existing socket cleanly
-      if (socketRef.current) socketRef.current.disconnect();
 
-      // Determine backend URL:
-      //   • In development (Vite proxy), connect to window.location.origin (proxied to :5000)
-      //   • In production (Render single-service), connect to window.location.origin
-      //   Both cases are identical — origin always reaches the correct backend.
-      const socketURL = window.location.origin;
+    // Disconnect any stale socket before creating a new one
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
 
-      const s = io(socketURL, {
-        auth: { token },
-        // Allow polling → websocket upgrade (DO NOT force websocket-only —
-        // Render's free-tier proxy can block raw WS on first handshake)
-        transports: ['polling', 'websocket'],
-        reconnection: true,
-        reconnectionDelay: 2000,
-        reconnectionAttempts: 10,
-        timeout: 20000,
-      });
+    const socketURL = getSocketUrl(); // same helper as MultiplayerBattlePage
 
-      s.on('connect', () => {
-        console.log('[Socket] Connected:', s.id);
-        setSocketConnected(true);
-      });
+    console.log('[App Socket] Connecting to:', socketURL);
 
-      s.on('disconnect', (reason) => {
-        console.warn('[Socket] Disconnected:', reason);
-        setSocketConnected(false);
-      });
-
-      s.on('connect_error', (err) => {
-        console.error('[Socket] Connection error:', err.message);
-        setSocketConnected(false);
-      });
-
-      socketRef.current = s;
-      setBattleSocket(s);
-    }).catch((err) => {
-      console.error('[Socket] Failed to load socket.io-client:', err);
+    const s = io(socketURL, {
+      auth: { token },
+      // websocket first (same order as MultiplayerBattlePage — confirmed working).
+      // Render free-tier kills long-poll HTTP after 55 s, so polling-first causes
+      // the handshake to fail repeatedly before WebSocket upgrade is attempted.
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 2000,
+      reconnectionAttempts: 15,
+      timeout: 10000,
     });
+
+    s.on('connect', () => {
+      console.log('[App Socket] ✅ Connected. id:', s.id, '| transport:', s.io.engine.transport.name);
+      setSocketConnected(true);
+    });
+
+    s.on('disconnect', (reason) => {
+      console.warn('[App Socket] ❌ Disconnected. reason:', reason);
+      setSocketConnected(false);
+    });
+
+    s.on('connect_error', (err) => {
+      console.error('[App Socket] ⚠️ connect_error:', err.message);
+      setSocketConnected(false);
+    });
+
+    s.io.on('reconnect_attempt', (attempt) => {
+      console.log('[App Socket] 🔄 reconnect_attempt #', attempt);
+    });
+
+    s.io.on('reconnect_failed', () => {
+      console.error('[App Socket] ✖ reconnect_failed — giving up after max attempts');
+      setSocketConnected(false);
+    });
+
+    socketRef.current = s;
+    setBattleSocket(s);
+
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        setBattleSocket(null);
-        setSocketConnected(false);
-      }
+      s.off('connect');
+      s.off('disconnect');
+      s.off('connect_error');
+      s.disconnect();
+      socketRef.current = null;
+      setBattleSocket(null);
+      setSocketConnected(false);
     };
   }, [user?.id, token]);
 
