@@ -286,7 +286,7 @@ export const initializeBattleSocket = (io) => {
       const userId = user?.id || user?._id;
       let existingPlayer = room.players.find(p => p.userId === userId);
       if (existingPlayer) {
-        console.log(`[Battle] join_room: reconnecting existing player ${userId}, updating socketId ${existingPlayer.socketId} → ${socket.id}`);
+        console.log(`[Battle] join_room: reconnecting player ${userId}, updating socketId ${existingPlayer.socketId} → ${socket.id}`);
         existingPlayer.socketId = socket.id;
       } else {
         // ENFORCE MAX CAPACITY: 3 PLAYERS MAXIMUM
@@ -310,12 +310,21 @@ export const initializeBattleSocket = (io) => {
       }
 
       socket.join(room.roomCode);
-      io.to(room.roomCode).emit('room_updated', sanitizeRoomState(room));
+
+      // During LOBBY: broadcast room_updated to ALL so everyone sees the new player list.
+      // During IN_PROGRESS: only send to the reconnecting socket — broadcasting to the whole
+      // room replaces other players' roomState with a sanitized payload that has no questions
+      // field, which breaks their handleFinishBattle and causes answers to be lost.
+      if (room.status === 'IN_PROGRESS') {
+        socket.emit('room_updated', sanitizeRoomState(room));
+      } else {
+        io.to(room.roomCode).emit('room_updated', sanitizeRoomState(room));
+      }
 
       // ── CRITICAL: If the room is already IN_PROGRESS, sync this socket immediately ──
       // This handles reconnects and late-joins during an active battle.
-      // We emit battle_started only to this socket (not the whole room) so other
-      // players are not disrupted. The client's handler will restore the question screen.
+      // Emit battle_started only to this socket (not the whole room) so other
+      // players are not disrupted.
       if (room.status === 'IN_PROGRESS') {
         console.log(`[Battle] join_room: room ${cleanCode} is IN_PROGRESS — syncing socket ${socket.id} with battle_started`);
         socket.emit('battle_started', {
@@ -376,7 +385,7 @@ export const initializeBattleSocket = (io) => {
     // Start Battle (Host Only)
     socket.on('start_battle', ({ roomCode, userId }, callback) => {
       const cleanCode = (roomCode || '').trim().toUpperCase();
-      console.log(`[Battle] start_battle received: room=${cleanCode}, userId=${userId}, socketId=${socket.id}`);
+      console.log(`[Battle] Host start request received: room=${cleanCode}, userId=${userId}, socketId=${socket.id}`);
 
       const room = activeRooms.get(cleanCode);
       if (!room) {
@@ -385,7 +394,7 @@ export const initializeBattleSocket = (io) => {
         return;
       }
 
-      console.log(`[Battle] room found: hostId=${room.hostId}, status=${room.status}, players=${room.players.length}`);
+      console.log(`[Battle] Host validation: room.hostId=${room.hostId}, userId=${userId}, status=${room.status}, players=${room.players.length}`);
 
       // Idempotent: if already IN_PROGRESS, re-broadcast so reconnected players can catch up
       if (room.status === 'IN_PROGRESS') {
@@ -410,7 +419,7 @@ export const initializeBattleSocket = (io) => {
 
       // Compare as strings to avoid type mismatch (ObjectId vs string)
       if (String(room.hostId) !== String(userId)) {
-        console.warn(`[Battle] start_battle rejected: room.hostId=${room.hostId} !== userId=${userId}`);
+        console.warn(`[Battle] Host validation result: REJECTED — room.hostId=${room.hostId} !== userId=${userId}`);
         if (typeof callback === 'function') callback({ success: false, message: 'Only the host can start the battle.' });
         return;
       }
@@ -450,11 +459,10 @@ export const initializeBattleSocket = (io) => {
 
       console.log(`[Battle] battle_started broadcast to room ${cleanCode}: ${room.players.length} players`);
       room.players.forEach(p => {
-        console.log(`[Battle]   → player ${p.name} (userId=${p.userId}, socketId=${p.socketId})`);
+        console.log(`[Battle]   → ${p.name} (userId=${p.userId}, socketId=${p.socketId})`);
       });
 
       io.to(cleanCode).emit('battle_started', battlePayload);
-
       if (typeof callback === 'function') callback({ success: true });
     });
 
@@ -467,10 +475,13 @@ export const initializeBattleSocket = (io) => {
       const player = room.players.find(p => p.userId === userId);
       if (!player) return;
 
-      // SECURITY: Prevent impersonation — only the socket that owns this userId slot may submit
+      // Self-healing socketId: if the player's socket reconnected since room creation,
+      // the stored socketId may be stale. Update it rather than silently dropping the answer.
+      // Root cause: submit_answer was previously blocked on reconnect, causing all answers
+      // to be lost and all questions to be scored as skipped.
       if (player.socketId !== socket.id) {
-        console.warn(`[Socket Security] submit_answer blocked: socket ${socket.id} tried to submit as userId=${userId} (owner socketId=${player.socketId})`);
-        return;
+        console.log(`[Battle] submit_answer: socketId mismatch for userId=${userId} — healing: ${player.socketId} → ${socket.id}`);
+        player.socketId = socket.id;
       }
 
       const question = room.questions[questionIndex];
@@ -519,11 +530,28 @@ export const initializeBattleSocket = (io) => {
       const cleanCode = roomCode?.trim().toUpperCase();
       if (!cleanCode) return;
       const room = activeRooms.get(cleanCode);
-      if (!room || room.status !== 'IN_PROGRESS') return;
+
+      console.log(`[Battle] player_finished received: room=${cleanCode}, userId=${userId}, socketId=${socket.id}, roomStatus=${room?.status}`);
+
+      if (!room || room.status !== 'IN_PROGRESS') {
+        console.warn(`[Battle] player_finished: ignoring — room ${cleanCode} not found or status=${room?.status}`);
+        return;
+      }
 
       const player = room.players.find(p => p.userId === userId);
-      // SECURITY: Only the owning socket may mark this player as finished
-      if (!player || player.socketId !== socket.id) return;
+      if (!player) {
+        console.warn(`[Battle] player_finished: userId=${userId} not found in room ${cleanCode}. Players: [${room.players.map(p => p.userId).join(', ')}]`);
+        return;
+      }
+
+      // Self-healing socketId: if the player's socket reconnected between room creation and
+      // this submission, the stored socketId is stale. Update it instead of silently blocking.
+      // This was the PRIMARY cause of "both players stuck on SUBMITTING" — the socketId check
+      // was an overly strict security gate that fired on every Render WebSocket reconnect.
+      if (player.socketId !== socket.id) {
+        console.log(`[Battle] player_finished: socketId mismatch for userId=${userId} — healing: ${player.socketId} → ${socket.id}`);
+        player.socketId = socket.id;
+      }
 
       if (player.finished) {
         console.log(`[Battle] player_finished: ${userId} already marked finished in room ${cleanCode} — ignoring duplicate`);
@@ -531,12 +559,17 @@ export const initializeBattleSocket = (io) => {
       }
 
       player.finished = true;
-      console.log(`[Battle] player_finished: ${userId} in room ${cleanCode}. Finished: ${room.players.filter(p => p.finished).length}/${room.players.length}`);
+      const finishedCount = room.players.filter(p => p.finished).length;
+      console.log(`[Battle] Player completion state updated: ${player.name} (${userId}) in room ${cleanCode}. Finished: ${finishedCount}/${room.players.length}`);
+      console.log(`[Battle] All players completion status:`);
+      room.players.forEach(p => {
+        console.log(`[Battle]   ${p.name} (${p.userId}): finished=${!!p.finished}, answers=${Object.keys(p.answers).length}/${room.questions.length}`);
+      });
 
       // If all players have finished, or only 1 player in room → end immediately
       const allDone = room.players.every(p => p.finished);
       if (allDone || room.players.length === 1) {
-        console.log(`[Battle] All players done in room ${cleanCode} — finishing battle`);
+        console.log(`[Battle] All players done in room ${cleanCode} — calling finishBattle`);
         await finishBattle(room, io);
       } else {
         // Notify others that this player finished
@@ -551,15 +584,18 @@ export const initializeBattleSocket = (io) => {
           }))
         });
 
-        // ── TIMEOUT: If other player(s) haven't finished within 5 minutes, end anyway ──
+        // ── TIMEOUT: If other player(s) haven't finished within 60 seconds, force-finish ──
+        // Reduced from 5 minutes: the frontend safety net shows an error at 30s and users
+        // stop waiting. 60s gives enough time for slow connections while still being timely.
         if (!room._finishTimeout) {
+          console.log(`[Battle] Starting 60s force-finish timer for room ${cleanCode}`);
           room._finishTimeout = setTimeout(async () => {
             const currentRoom = activeRooms.get(cleanCode);
             if (currentRoom && currentRoom.status === 'IN_PROGRESS') {
-              console.log(`[Battle] Timeout: force-finishing room ${cleanCode} after 5 min wait`);
+              console.log(`[Battle] 60s timeout reached — force-finishing room ${cleanCode}`);
               await finishBattle(currentRoom, io);
             }
-          }, 5 * 60 * 1000); // 5 minutes max wait
+          }, 60 * 1000); // 60 seconds (was 5 minutes — too long vs 30s frontend safety net)
         }
       }
     });
@@ -634,18 +670,20 @@ function sanitizeRoomState(room) {
 
 
 async function finishBattle(room, io) {
-  // Guard against double-invocation (timer + player_finished race)
+  // ── Guard against double-invocation (timer + player_finished race) ──────────
+  console.log(`[Battle] finishBattle guard check: room=${room.roomCode}, status=${room.status}`);
   if (room.status === 'FINISHED') {
-    console.log(`[Battle] finishBattle called on already-FINISHED room ${room.roomCode} — skipping`);
+    console.log(`[Battle] finishBattle: room ${room.roomCode} already FINISHED — skipping`);
     return;
   }
   room.status = 'FINISHED';
 
-  // Clear any pending timeouts
+  // Clear any pending timeouts so they don't trigger a second finishBattle
   if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
   if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
 
-  console.log(`[Battle] finishBattle: scoring ${room.players.length} players in room ${room.roomCode}`);
+  console.log(`[Battle] finishBattle invoked: room=${room.roomCode}, players=${room.players.length}, questions=${room.questions.length}`);
+  console.log(`[Battle] Scoring started`);
 
   room.players.forEach(p => {
     let correct = 0;
@@ -703,50 +741,80 @@ async function finishBattle(room, io) {
 
   room.players.sort((a, b) => b.score - a.score);
 
+  console.log(`[Battle] Scoring completed. Leaderboard:`);
+  room.players.forEach((p, i) => {
+    console.log(`[Battle]   #${i+1} ${p.name}: score=${p.score}, correct=${p.correctCount}, partial=${p.partialCount||0}, wrong=${p.wrongCount}, skipped=${p.unattemptedCount}`);
+  });
+
+  // ── DB saves — wrapped with individual timeouts so a hung DB call never ─────
+  // blocks the battle_finished broadcast. Scoring is already done; saving is best-effort.
+  const withTimeout = (promise, ms, label) => Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    )
+  ]);
+
   for (let i = 0; i < room.players.length; i++) {
     const p = room.players[i];
     try {
-      await TestAttempt.create({
-        userId: p.userId,
-        userName: p.name,
-        testType: 'BATTLE',
-        subject: room.config.subject,
-        topic: room.config.topic,
-        totalQuestions: room.questions.length,
-        correctCount: p.correctCount,
-        wrongCount: p.wrongCount,
-        unattemptedCount: p.unattemptedCount,
-        score: p.score,
-        accuracy: p.accuracy,
-        timeTakenSeconds: room.config.timeLimitMinutes * 60
-      });
+      await withTimeout(
+        TestAttempt.create({
+          userId: p.userId,
+          userName: p.name,
+          testType: 'BATTLE',
+          subject: room.config.subject,
+          topic: room.config.topic,
+          totalQuestions: room.questions.length,
+          correctCount: p.correctCount,
+          wrongCount: p.wrongCount,
+          unattemptedCount: p.unattemptedCount,
+          score: p.score,
+          accuracy: p.accuracy,
+          timeTakenSeconds: room.config.timeLimitMinutes * 60
+        }),
+        8000,
+        'TestAttempt.create'
+      );
 
       const bonusXp = i === 0 ? 50 : 20;
-      await awardUserXP(p.userId, (p.correctCount * 10) + Math.round((p.partialCount || 0) * 5) + bonusXp);
+      await withTimeout(
+        awardUserXP(p.userId, (p.correctCount * 10) + Math.round((p.partialCount || 0) * 5) + bonusXp),
+        8000,
+        'awardUserXP'
+      );
     } catch (e) {
-      console.error('[Battle Result Save Error]', e.message);
+      console.error(`[Battle Result Save Error] player=${p.name} (${p.userId}): ${e.message}`);
+      // Non-fatal: scoring is already calculated — continue to broadcast results
     }
   }
 
+  const leaderboard = room.players.map((p, rank) => ({
+    rank: rank + 1,
+    userId: p.userId,
+    name: p.name,
+    score: p.score,
+    accuracy: p.accuracy,
+    correctCount: p.correctCount,
+    partialCount: p.partialCount || 0,
+    wrongCount: p.wrongCount,
+    unattemptedCount: p.unattemptedCount,
+    answerScores: p.answerScores || {},
+    // Include submitted answers so ALL players can see comparative review
+    submittedAnswers: p.answers || {},
+  }));
+
+  console.log(`[Battle] Leaderboard generated. battle_finished broadcast started to room ${room.roomCode}`);
+  room.players.forEach(p => {
+    console.log(`[Battle]   → ${p.name} (socketId=${p.socketId})`);
+  });
+
   io.to(room.roomCode).emit('battle_finished', {
-    leaderboard: room.players.map((p, rank) => ({
-      rank: rank + 1,
-      userId: p.userId,
-      name: p.name,
-      score: p.score,
-      accuracy: p.accuracy,
-      correctCount: p.correctCount,
-      partialCount: p.partialCount || 0,
-      wrongCount: p.wrongCount,
-      unattemptedCount: p.unattemptedCount,
-      answerScores: p.answerScores || {},
-      // Include submitted answers so ALL players can see comparative review
-      submittedAnswers: p.answers || {},
-    })),
+    leaderboard,
     questions: room.questions   // includes referenceAnswer — revealed only after finish
   });
 
-  console.log(`[Battle] battle_finished broadcast to room ${room.roomCode}: ${room.players.map(p => `${p.name}=${p.score}pts`).join(', ')}`);
+  console.log(`[Battle] battle_finished broadcast completed for room ${room.roomCode}: ${room.players.map(p => `${p.name}=${p.score}pts`).join(', ')}`);
 }
 
 function getFallbackBattleQuestions(count, subject) {

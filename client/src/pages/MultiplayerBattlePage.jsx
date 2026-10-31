@@ -112,10 +112,15 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
     });
 
     newSocket.on('battle_finished', ({ leaderboard, questions }) => {
-      // Clear safety-net timeout if present
+      console.log('[Battle] battle_finished received by client — navigating to results');
+      // Clear safety-net timeouts if present
       if (newSocket._finishTimeoutId) {
         clearTimeout(newSocket._finishTimeoutId);
         newSocket._finishTimeoutId = null;
+      }
+      if (newSocket._retryTimeoutId) {
+        clearTimeout(newSocket._retryTimeoutId);
+        newSocket._retryTimeoutId = null;
       }
       setSubmitting(false);
       setLeaderboard(leaderboard);
@@ -313,14 +318,18 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
   const handleFinishBattle = useCallback(() => {
     if (!socket || !roomState || submitting) return;
     setSubmitting(true);
+    setError('');
+
+    const userId = user.id || user._id;
+    const roomCode = roomState.roomCode;
 
     // Emit any unanswered questions as -1 (skip); short_answer uses empty string
     const questions = roomState.questions || [];
     questions.forEach((q, idx) => {
       if (selectedAnswers[idx] === undefined) {
         socket.emit('submit_answer', {
-          roomCode: roomState.roomCode,
-          userId: user.id || user._id,
+          roomCode,
+          userId,
           questionIndex: idx,
           selectedOptionIndex: q.questionType === 'short_answer' ? '' : -1,
         });
@@ -328,18 +337,29 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
     });
 
     // Tell server this player is done
-    socket.emit('player_finished', {
-      roomCode: roomState.roomCode,
-      userId: user.id || user._id,
-    });
+    console.log(`[Battle] Emitting player_finished: room=${roomCode}, userId=${userId}`);
+    socket.emit('player_finished', { roomCode, userId });
 
-    // Safety net: if battle_finished not received within 30s, show error
+    // Retry once after 15s in case the first player_finished was silently dropped
+    // (e.g. socket reconnected between emit and server processing)
+    const retryId = setTimeout(() => {
+      console.log('[Battle] Retrying player_finished (15s retry)');
+      socket.emit('player_finished', { roomCode, userId });
+    }, 15000);
+    socket._retryTimeoutId = retryId;
+
+    // Safety net: if battle_finished not received within 65s, show error
+    // 65s > 60s backend force-finish + 5s network overhead
     const timeoutId = setTimeout(() => {
+      if (socket._retryTimeoutId) {
+        clearTimeout(socket._retryTimeoutId);
+        socket._retryTimeoutId = null;
+      }
       setSubmitting(false);
       setError('Results are taking too long to arrive. Please wait or refresh if results still do not appear.');
-    }, 30000);
+    }, 65000);
 
-    // Store timeout id so we can clear it when battle_finished arrives
+    // Store timeout ids so we can clear them when battle_finished arrives
     socket._finishTimeoutId = timeoutId;
   }, [socket, roomState, selectedAnswers, submitting, user]);
 
