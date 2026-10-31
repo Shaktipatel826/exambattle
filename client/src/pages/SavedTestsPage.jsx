@@ -2,20 +2,181 @@
  * SavedTestsPage — Personal saved tests library.
  * Actions per test: Preview, Create Room (battle), Delete.
  *
- * Socket handling:
- *  - Creates a self-contained temporary socket just for room creation,
- *    removing the dependency on App.jsx socket prop.
+ * Battle flow:
+ *  1. Student clicks Battle → Question Count Selector modal opens.
+ *  2. Student picks a preset (10 / 20 / 30 / 50) or enters a custom number.
+ *  3. Confirm → self-contained socket emits create_room_from_saved_test with
+ *     the chosen count. Server does Fisher-Yates random sampling server-side.
+ *  4. All players in the same room receive the identical randomly-sampled set.
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen, Swords, Trash2, Eye, Loader2, Plus, AlertCircle,
   CheckCircle2, Calendar, HelpCircle, Cpu, ChevronDown, ChevronUp,
-  RefreshCw
+  RefreshCw, Shuffle, X
 } from 'lucide-react';
 import { getSocketUrl } from '../lib/apiConfig';
 
 const LANG_LABELS = { en: 'English', hi: 'Hindi', bilingual: 'Bilingual' };
+const QUICK_COUNTS = [10, 20, 30, 50];
 
+// ── Question Count Selector Modal ────────────────────────────────────────────
+const QuestionCountModal = ({ test, onConfirm, onClose }) => {
+  const total = test.questionCount || 0;
+  const defaultCount = Math.min(20, total);
+  const [selected, setSelected] = useState(
+    QUICK_COUNTS.includes(defaultCount) ? defaultCount : Math.min(QUICK_COUNTS[0], total)
+  );
+  const [customMode, setCustomMode] = useState(false);
+  const [customVal, setCustomVal] = useState(String(defaultCount));
+  const [validationErr, setValidationErr] = useState('');
+
+  const effectiveCount = customMode ? parseInt(customVal, 10) || 0 : selected;
+
+  const validate = (val) => {
+    const n = parseInt(val, 10);
+    if (!val.trim() || isNaN(n) || n < 1) return 'Please enter a valid number (minimum 1).';
+    if (n > total) return `Only ${total} questions available. Enter ${total} or fewer.`;
+    return '';
+  };
+
+  const handleCustomChange = (v) => {
+    setCustomVal(v);
+    setValidationErr(validate(v));
+  };
+
+  const handleQuickPick = (n) => {
+    setCustomMode(false);
+    setValidationErr('');
+    setSelected(n);
+  };
+
+  const handleConfirm = () => {
+    if (customMode) {
+      const err = validate(customVal);
+      if (err) { setValidationErr(err); return; }
+    }
+    onConfirm(effectiveCount);
+  };
+
+  const isConfirmDisabled = customMode
+    ? (!!validationErr || !customVal.trim() || parseInt(customVal, 10) < 1)
+    : false;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#252525]/50 backdrop-blur-sm p-4">
+      <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl shadow-2xl w-full max-w-sm space-y-5 p-6">
+
+        {/* Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-black text-[#252525] text-base leading-snug">Select Questions</h2>
+            <p className="text-xs text-[#66635D] mt-0.5 leading-relaxed">
+              <span className="font-bold text-[#244A73]">{total}</span> questions available in this test.
+              A random selection will be used for the battle.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#F7F3EA] text-[#66635D] transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Test title */}
+        <div className="px-3 py-2 rounded-xl bg-[#F7F3EA] border border-[#E2DACB]">
+          <p className="text-[11px] text-[#66635D] font-semibold truncate">{test.title}</p>
+        </div>
+
+        {/* Quick picks */}
+        <div>
+          <p className="text-[11px] font-bold text-[#66635D] uppercase tracking-wide mb-2">Quick Select</p>
+          <div className="grid grid-cols-4 gap-2">
+            {QUICK_COUNTS.map(n => {
+              const disabled = n > total;
+              const active = !customMode && selected === n;
+              return (
+                <button
+                  key={n}
+                  onClick={() => !disabled && handleQuickPick(n)}
+                  disabled={disabled}
+                  className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${
+                    disabled
+                      ? 'bg-[#F7F3EA] border-[#E2DACB] text-[#D5CDBF] cursor-not-allowed'
+                      : active
+                      ? 'bg-[#244A73] border-[#244A73] text-white shadow-sm'
+                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525] hover:border-[#244A73] hover:bg-[#EFE9DC]'
+                  }`}
+                >
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Custom number */}
+        <div>
+          <p className="text-[11px] font-bold text-[#66635D] uppercase tracking-wide mb-2">Custom Number</p>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min={1}
+              max={total}
+              value={customVal}
+              onFocus={() => setCustomMode(true)}
+              onChange={e => { setCustomMode(true); handleCustomChange(e.target.value); }}
+              placeholder={`1 – ${total}`}
+              className={`flex-1 px-3 py-2.5 rounded-xl text-xs font-semibold border focus:outline-none transition-colors ${
+                customMode
+                  ? 'bg-[#EFE9DC] border-[#244A73] text-[#252525]'
+                  : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
+              }`}
+            />
+            {customMode && !validationErr && parseInt(customVal, 10) >= 1 && parseInt(customVal, 10) <= total && (
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-green-50 border border-green-200">
+                <CheckCircle2 className="w-4 h-4 text-green-600" />
+              </div>
+            )}
+          </div>
+          {validationErr && (
+            <p className="mt-1.5 text-[11px] text-red-600 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3 shrink-0" /> {validationErr}
+            </p>
+          )}
+        </div>
+
+        {/* Selected count summary */}
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#244A73]/8 border border-[#244A73]/20">
+          <Shuffle className="w-3.5 h-3.5 text-[#244A73] shrink-0" />
+          <p className="text-xs text-[#244A73] font-semibold">
+            {effectiveCount >= 1 && effectiveCount <= total
+              ? `${effectiveCount} questions will be randomly picked from ${total}`
+              : 'Enter a valid count to continue'}
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-[#E2DACB] text-[#66635D] text-xs font-semibold hover:bg-[#F7F3EA] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={isConfirmDisabled}
+            className="flex-1 py-2.5 rounded-xl bg-[#244A73] text-white text-xs font-bold hover:bg-[#1a3a5c] disabled:opacity-50 flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <Swords className="w-3.5 h-3.5" />
+            Start Battle
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Main Page ────────────────────────────────────────────────────────────────
 export const SavedTestsPage = ({ token, user, onNavigate }) => {
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -25,8 +186,10 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [creatingRoom, setCreatingRoom] = useState(null);
+  const [creatingRoom, setCreatingRoom] = useState(null);   // testId while socket is working
   const [roomResults, setRoomResults] = useState({});
+  // Question count selector: stores the test object when modal is open
+  const [battleSetup, setBattleSetup] = useState(null);
 
   const fetchTests = useCallback(async () => {
     setLoading(true);
@@ -88,7 +251,15 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
     finally { setPreviewLoading(false); }
   };
 
-  const handleCreateRoom = async (test) => {
+  // Opens the question count selector modal
+  const openBattleSetup = (test) => {
+    setRoomResults(prev => ({ ...prev, [test._id]: {} }));
+    setBattleSetup(test);
+  };
+
+  // Called when student confirms count in the modal
+  const handleCreateRoom = async (test, questionCount) => {
+    setBattleSetup(null);
     setCreatingRoom(test._id);
     setRoomResults(prev => ({ ...prev, [test._id]: {} }));
 
@@ -126,7 +297,11 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
         tempSocket.emit('create_room_from_saved_test', {
           user: { id: user?.id || user?._id, name: user?.name },
           savedTestId: test._id,
-          config: { timeLimitMinutes: Math.max(5, Math.ceil((test.questionCount || 10) * 1.5)) }
+          config: {
+            questionCount,
+            timeLimitMinutes: Math.max(5, Math.ceil(questionCount * 1.5)),
+            negativeMarking: 0.25,
+          }
         }, (ack) => {
           clearTimeout(timeoutId);
           cleanup();
@@ -170,6 +345,15 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 lg:pb-8 space-y-6">
 
+      {/* Question Count Selector Modal */}
+      {battleSetup && (
+        <QuestionCountModal
+          test={battleSetup}
+          onConfirm={(count) => handleCreateRoom(battleSetup, count)}
+          onClose={() => setBattleSetup(null)}
+        />
+      )}
+
       {/* Delete Confirm Modal */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#252525]/40 backdrop-blur-sm p-4">
@@ -207,7 +391,6 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
           <Plus className="w-4 h-4" /> Create New Test
         </button>
       </div>
-
 
       {/* API error */}
       {error && (
@@ -298,11 +481,11 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
                           : <Eye className="w-4 h-4" />}
                       </button>
 
-                      {/* Battle button */}
+                      {/* Battle button — opens question count picker */}
                       <button
-                        onClick={() => handleCreateRoom(test)}
+                        onClick={() => openBattleSetup(test)}
                         disabled={isCreating}
-                        title="Create Battle Room"
+                        title="Select questions and create Battle Room"
                         className="flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 bg-[#244A73] hover:bg-[#1a3a5c] text-white">
                         {isCreating
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -330,7 +513,7 @@ export const SavedTestsPage = ({ token, user, onNavigate }) => {
                       <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                       {roomRes.error}
                       <button
-                        onClick={() => handleCreateRoom(test)}
+                        onClick={() => openBattleSetup(test)}
                         className="ml-auto font-bold underline whitespace-nowrap">
                         Retry
                       </button>

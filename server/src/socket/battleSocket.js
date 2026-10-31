@@ -189,11 +189,37 @@ export const initializeBattleSocket = (io) => {
           return;
         }
 
-        const questions = savedTest.questions;
-        if (!questions || questions.length === 0) {
+        const allQuestions = savedTest.questions;
+        if (!allQuestions || allQuestions.length === 0) {
           if (typeof callback === 'function') callback({ success: false, message: 'Saved test has no questions.' });
           return;
         }
+
+        // ── Random Question Sampling (Fisher-Yates) ──────────────────────────
+        // Determine how many questions the host wants. Defaults to all.
+        const requestedCount = config?.questionCount
+          ? Math.min(Math.max(parseInt(config.questionCount, 10) || allQuestions.length, 1), allQuestions.length)
+          : allQuestions.length;
+
+        // Validate: cannot request more than available
+        if (config?.questionCount && parseInt(config.questionCount, 10) > allQuestions.length) {
+          if (typeof callback === 'function') callback({
+            success: false,
+            message: `Only ${allQuestions.length} questions available. Please select ${allQuestions.length} or fewer.`
+          });
+          return;
+        }
+
+        // Fisher-Yates shuffle on a shallow copy of the array, then slice
+        const pool = allQuestions.map((q, i) => i); // array of indices
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        const selectedIndices = pool.slice(0, requestedCount);
+        const questions = selectedIndices.map(idx => allQuestions[idx]);
+
+        console.log(`[Battle] Room from saved test: ${allQuestions.length} total → ${questions.length} selected (random).`);
 
         const roomCode = generateRoomCode();
         const roomState = {
@@ -204,9 +230,10 @@ export const initializeBattleSocket = (io) => {
             subject: savedTest.subject || 'Custom Test',
             topic: savedTest.topic || 'General',
             questionCount: questions.length,
-            timeLimitMinutes: config?.timeLimitMinutes || 10,
+            timeLimitMinutes: config?.timeLimitMinutes || Math.max(5, Math.ceil(questions.length * 1.5)),
             negativeMarking: config?.negativeMarking ?? 0.25,
-            difficulty: savedTest.difficulty || 'Mixed'
+            difficulty: savedTest.difficulty || 'Mixed',
+            totalAvailable: allQuestions.length,  // for lobby display
           },
           status: 'LOBBY',
           questions,
@@ -225,7 +252,7 @@ export const initializeBattleSocket = (io) => {
           startTime: null,
           endTime: null,
           createdAt: Date.now(),
-          _customQuestions: true  // rematch keeps original questions
+          _customQuestions: true  // rematch keeps already-selected questions (no reshuffle)
         };
 
         activeRooms.set(roomCode, roomState);
