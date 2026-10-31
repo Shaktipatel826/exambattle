@@ -40,28 +40,25 @@ const PIPELINE_STEPS = [
 /** The reusable prompt students copy into ChatGPT / Gemini / Claude */
 const EXTERNAL_AI_PROMPT = `You are helping me prepare for Indian competitive exams (SSC CGL, Railway NTPC, UP Police, UPSC, Banking).
 
-Study the material I will provide. Generate multiple-choice questions (MCQs) from it.
+Study the material I will provide carefully. Generate direct question-and-answer pairs from it.
 
 FORMAT RULES — follow exactly:
-Q1. [Question text]
-A) [Option A]
-B) [Option B]
-C) [Option C]
-D) [Option D]
-Correct: [A/B/C/D]
-Explanation: [Brief 1-2 sentence explanation]
+Q1: [Question text]
+Answer: [Reference answer — one word, phrase, date, name, or short sentence]
+Explanation: [Optional 1-2 sentence explanation — omit if not needed]
 
-Q2. [Next question]
-...
+Q2: [Next question]
+Answer: [Reference answer]
 
 Rules:
-- Every question must have exactly 4 options (A, B, C, D).
-- Every question must have exactly one "Correct:" line with a single letter.
-- Do NOT number the options beyond A/B/C/D.
+- Do NOT generate multiple-choice options (A/B/C/D). Direct answers only.
+- Every question must have exactly one "Answer:" line.
+- Explanation is optional — include only if it adds useful context.
 - Do NOT add any text before Q1 or after the last question.
 - Questions can be in Hindi, English, or a mix — match the source language.
 - Do NOT invent facts. Only use information from the provided material.
-- Generate as many good questions as the material supports.`;
+- Generate as many meaningful questions as the material supports.
+- Do not repeat the same question twice.`;
 
 function VerdictBadge({ verdict }) {
   if (verdict === 'PASS') return (
@@ -612,7 +609,7 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
                 'Copy the prompt below.',
                 'Open ChatGPT, Gemini, Claude or any other AI tool.',
                 'Upload your PDF, textbook images, notes or study material.',
-                'Paste the prompt and ask the AI to generate questions.',
+                'Paste the prompt and ask the AI to generate direct Q&A pairs (no MCQ options).',
                 'Copy the AI\'s output and paste it into the box below.',
               ].map((step, i) => (
                 <li key={i} className="flex items-start gap-2">
@@ -649,20 +646,29 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
               Paste AI-Generated Q&amp;A
             </h2>
             <p className="text-xs text-[#66635D]">
-              Paste the AI output here. Each question must follow this format:
+              Paste the AI output here. Each question must follow this format — <strong>no A/B/C/D options needed</strong>:
             </p>
             <div className="bg-[#F7F3EA] border border-[#D5CDBF] rounded-xl p-3 text-[10px] font-mono text-[#252525] leading-relaxed whitespace-pre">
-{`Q1. What is the capital of India?
-A) Mumbai
-B) New Delhi
-C) Kolkata
-D) Chennai
-Correct: B
-Explanation: New Delhi has been the capital since 1911.`}
+{`Q1: भारत के प्रथम राष्ट्रपति कौन थे?
+Answer: डॉ. राजेंद्र प्रसाद
+
+Q2: भारत कब स्वतंत्र हुआ था?
+Answer: 15 अगस्त 1947
+Explanation: भारत 15 अगस्त 1947 को ब्रिटिश शासन से स्वतंत्र हुआ।
+
+Q3: Who founded the Maurya Empire?
+Answer: Chandragupta Maurya`}
             </div>
             <textarea
               rows={12}
-              placeholder="Paste the complete Q&A output from ChatGPT / Gemini / Claude here…"
+              placeholder="Paste the Q&amp;A output from ChatGPT / Gemini / Claude here…
+
+Example:
+Q1: भारत के प्रथम राष्ट्रपति कौन थे?
+Answer: डॉ. राजेंद्र प्रसाद
+
+Q2: Who founded the Maurya Empire?
+Answer: Chandragupta Maurya"
               value={qaText}
               onChange={e => setQaText(e.target.value)}
               className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-xs resize-y focus:outline-none focus:border-[#244A73] transition-colors font-mono"
@@ -988,32 +994,48 @@ Explanation: New Delhi has been the capital since 1911.`}
                         value={editDraft?.question || ''}
                         onChange={e => setEditDraft(d => ({ ...d, question: e.target.value }))}
                       />
-                      <div className="space-y-2">
-                        {editDraft?.options?.map((opt, oi) => (
-                          <div key={oi} className="flex items-center gap-2">
-                            <input type="radio" name={`ca-${idx}`}
-                              checked={editDraft.correctAnswer === oi}
-                              onChange={() => setEditDraft(d => ({ ...d, correctAnswer: oi }))}
-                              className="shrink-0" />
-                            <input
-                              className="flex-1 px-2 py-1.5 rounded-lg border border-[#D5CDBF] bg-[#FFFDF8] text-xs focus:outline-none focus:border-[#244A73]"
-                              value={opt}
-                              onChange={e => {
-                                const opts = [...editDraft.options];
-                                opts[oi] = e.target.value;
-                                setEditDraft(d => ({ ...d, options: opts }));
-                              }}
-                            />
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                              editDraft.correctAnswer === oi
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-[#EFE9DC] text-[#66635D]'
-                            }`}>
-                              {String.fromCharCode(65 + oi)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+
+                      {/* Short-answer edit: just a reference answer textarea */}
+                      {editDraft?.questionType === 'short_answer' ? (
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#66635D] mb-1">Reference Answer</label>
+                          <textarea
+                            className="w-full px-3 py-2 rounded-lg border border-[#D5CDBF] bg-[#FFFDF8] text-xs text-[#252525] resize-none focus:outline-none focus:border-[#244A73]"
+                            rows={2}
+                            value={editDraft?.referenceAnswer || ''}
+                            onChange={e => setEditDraft(d => ({ ...d, referenceAnswer: e.target.value }))}
+                          />
+                        </div>
+                      ) : (
+                        /* MCQ edit: options + correct answer radio */
+                        <div className="space-y-2">
+                          {editDraft?.options?.map((opt, oi) => (
+                            <div key={oi} className="flex items-center gap-2">
+                              <input type="radio" name={`ca-${idx}`}
+                                checked={editDraft.correctAnswer === oi}
+                                onChange={() => setEditDraft(d => ({ ...d, correctAnswer: oi }))}
+                                className="shrink-0" />
+                              <input
+                                className="flex-1 px-2 py-1.5 rounded-lg border border-[#D5CDBF] bg-[#FFFDF8] text-xs focus:outline-none focus:border-[#244A73]"
+                                value={opt}
+                                onChange={e => {
+                                  const opts = [...editDraft.options];
+                                  opts[oi] = e.target.value;
+                                  setEditDraft(d => ({ ...d, options: opts }));
+                                }}
+                              />
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                                editDraft.correctAnswer === oi
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-[#EFE9DC] text-[#66635D]'
+                              }`}>
+                                {String.fromCharCode(65 + oi)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       <textarea
                         className="w-full px-3 py-2 rounded-lg border border-[#D5CDBF] bg-[#FFFDF8] text-xs text-[#252525] resize-none focus:outline-none focus:border-[#244A73]"
                         rows={2}
@@ -1062,22 +1084,34 @@ Explanation: New Delhi has been the capital since 1911.`}
 
                       {expandedQ === idx && (
                         <div className="px-3 pb-3 pt-1 space-y-2 bg-[#F7F3EA] border-t border-[#E2DACB]">
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {q.options?.map((opt, oi) => (
-                              <div key={oi}
-                                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs border ${
-                                  oi === q.correctAnswer
-                                    ? 'bg-green-50 border-green-200 text-green-800 font-semibold'
-                                    : 'bg-[#FFFDF8] border-[#E2DACB] text-[#252525]'
-                                }`}>
-                                <span className="font-bold shrink-0">{String.fromCharCode(65 + oi)})</span>
-                                <span>{opt}</span>
-                                {oi === q.correctAnswer && (
-                                  <CheckCircle2 className="w-3.5 h-3.5 ml-auto shrink-0 text-green-600" />
-                                )}
+                          {/* Short-answer: show reference answer */}
+                          {q.questionType === 'short_answer' ? (
+                            <div className="flex items-start gap-2 px-2 py-2 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800">
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5 text-green-600" />
+                              <div>
+                                <span className="font-bold text-green-700">Answer: </span>
+                                {q.referenceAnswer}
                               </div>
-                            ))}
-                          </div>
+                            </div>
+                          ) : (
+                            /* MCQ: show options grid */
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {q.options?.map((opt, oi) => (
+                                <div key={oi}
+                                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs border ${
+                                    oi === q.correctAnswer
+                                      ? 'bg-green-50 border-green-200 text-green-800 font-semibold'
+                                      : 'bg-[#FFFDF8] border-[#E2DACB] text-[#252525]'
+                                  }`}>
+                                  <span className="font-bold shrink-0">{String.fromCharCode(65 + oi)})</span>
+                                  <span>{opt}</span>
+                                  {oi === q.correctAnswer && (
+                                    <CheckCircle2 className="w-3.5 h-3.5 ml-auto shrink-0 text-green-600" />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           {q.explanation && (
                             <div className="text-[11px] text-[#66635D] bg-[#FFFDF8] border border-[#E2DACB] rounded-lg p-2">
                               <span className="font-bold text-[#244A73]">Explanation: </span>{q.explanation}

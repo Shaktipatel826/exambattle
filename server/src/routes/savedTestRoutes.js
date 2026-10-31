@@ -16,135 +16,123 @@ const router = express.Router();
 
 // ─── Q&A Text Parser ──────────────────────────────────────────────────────────
 /**
- * Parse raw Q&A text in the format:
+ * Parse raw direct Q&A text in the format:
  *
- *   Q1. Question text?
- *   A) Option A
- *   B) Option B
- *   C) Option C
- *   D) Option D
- *   Correct: B
- *   Explanation: Optional explanation text.
+ *   Q1: Question text here
+ *   Answer: Reference answer here
+ *   Explanation: Optional explanation (omittable)
  *
- * Returns { success, questions, errors, stats }
- * Does NOT save anything to the database.
+ *   Q2: अगला सवाल यहाँ
+ *   Answer: जवाब यहाँ
+ *
+ * - No MCQ options (A/B/C/D) involved.
+ * - Supports Hindi, English, Hinglish.
+ * - Supports multi-line questions and multi-line answers.
+ * - Returns { questions, errors, stats }.
+ * - Does NOT save anything to the database.
  */
 function parseQAText(rawText) {
   const questions = [];
   const errors = [];
+  const seenQuestions = new Set(); // lowercase-trimmed, for duplicate detection
 
-  // Normalize line endings and split into non-empty lines
+  // Normalize line endings
   const lines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
 
   let i = 0;
-  let questionIndex = 0;
 
   while (i < lines.length) {
     const line = lines[i].trim();
 
-    // Look for a question line: starts with Q<number>. or Q<number>)
-    const qMatch = line.match(/^Q\s*(\d+)[.)]\s+(.+)/i);
+    // Look for a question line: Q<number>: or Q<number>.
+    // Accepts: Q1: Q2. Q10: q1: (case-insensitive)
+    const qMatch = line.match(/^Q\s*(\d+)\s*[:.]\s*(.+)?/i);
     if (!qMatch) {
       i++;
       continue;
     }
 
-    questionIndex++;
     const qNum = parseInt(qMatch[1], 10);
-    let questionText = qMatch[2].trim();
+    let questionText = (qMatch[2] || '').trim();
     i++;
 
-    // Collect continuation lines of the question (until we hit an option line)
+    // Collect continuation lines of the question until Answer:/Q<n>:
     while (i < lines.length) {
       const nextLine = lines[i].trim();
-      if (/^[ABCD][.)]\s/i.test(nextLine)) break;
-      if (/^(Correct|Answer)\s*:/i.test(nextLine)) break;
-      if (/^Q\s*\d+[.)]/i.test(nextLine)) break;
-      if (nextLine !== '') questionText += ' ' + nextLine;
+      if (/^(Answer|Ans)\s*:/i.test(nextLine)) break;
+      if (/^Q\s*\d+\s*[:.]/i.test(nextLine)) break;
+      if (/^Explanation\s*:/i.test(nextLine)) break;
+      // Blank line is allowed within multi-line question but two blanks in a row = stop
+      questionText += (nextLine ? ' ' + nextLine : '');
       i++;
     }
+    questionText = questionText.trim();
 
-    // Parse options A) B) C) D)
-    const options = [];
-    const optionLetters = ['A', 'B', 'C', 'D'];
-    for (const letter of optionLetters) {
-      if (i >= lines.length) break;
-      const optLine = lines[i].trim();
-      const optMatch = optLine.match(new RegExp(`^${letter}[.)]\\s+(.+)`, 'i'));
-      if (optMatch) {
-        options.push(optMatch[1].trim());
+    // Parse Answer: line
+    let referenceAnswer = '';
+    if (i < lines.length && /^(Answer|Ans)\s*:/i.test(lines[i].trim())) {
+      const ansMatch = lines[i].trim().match(/^(Answer|Ans)\s*:\s*(.*)/i);
+      referenceAnswer = (ansMatch?.[2] || '').trim();
+      i++;
+      // Collect multi-line answer
+      while (i < lines.length) {
+        const al = lines[i].trim();
+        if (/^(Explanation|Q\s*\d+\s*[:.:])/i.test(al)) break;
+        if (/^Q\s*\d+\s*[:.]/i.test(al)) break;
+        if (al === '') { i++; break; } // blank line ends answer
+        referenceAnswer += ' ' + al;
         i++;
-        // Collect continuation lines of this option
-        while (i < lines.length) {
-          const cont = lines[i].trim();
-          if (/^[ABCD][.)]\s/i.test(cont)) break;
-          if (/^(Correct|Answer)\s*:/i.test(cont)) break;
-          if (/^Q\s*\d+[.)]/i.test(cont)) break;
-          if (cont !== '') options[options.length - 1] += ' ' + cont;
-          i++;
-        }
       }
+      referenceAnswer = referenceAnswer.trim();
     }
 
-    // Parse Correct: line
-    let correctAnswer = null;
+    // Parse optional Explanation:
     let explanation = '';
-
-    while (i < lines.length) {
-      const cl = lines[i].trim();
-      if (/^Q\s*\d+[.)]/i.test(cl)) break;
-
-      const correctMatch = cl.match(/^(Correct|Answer)\s*:\s*([ABCD])/i);
-      if (correctMatch) {
-        const letter = correctMatch[2].toUpperCase();
-        correctAnswer = optionLetters.indexOf(letter); // 0-3
+    if (i < lines.length && /^Explanation\s*:/i.test(lines[i].trim())) {
+      const expMatch = lines[i].trim().match(/^Explanation\s*:\s*(.*)/i);
+      explanation = (expMatch?.[1] || '').trim();
+      i++;
+      while (i < lines.length) {
+        const el = lines[i].trim();
+        if (/^Q\s*\d+\s*[:.]/i.test(el)) break;
+        if (el === '') { i++; break; }
+        explanation += ' ' + el;
         i++;
-        continue;
       }
-
-      const explanationMatch = cl.match(/^Explanation\s*:\s*(.+)/i);
-      if (explanationMatch) {
-        explanation = explanationMatch[1].trim();
-        i++;
-        // Collect multi-line explanation
-        while (i < lines.length) {
-          const el = lines[i].trim();
-          if (/^Q\s*\d+[.)]/i.test(el)) break;
-          if (/^(Correct|Answer)\s*:/i.test(el)) break;
-          if (el !== '') explanation += ' ' + el;
-          else break; // blank line ends explanation
-          i++;
-        }
-        continue;
-      }
-
-      // Blank line — skip
-      if (cl === '') { i++; continue; }
-
-      // Unknown content before next Q — stop
-      break;
+      explanation = explanation.trim();
     }
 
-    // Validate the parsed question
-    const lineRef = `Q${qNum}`;
+    // Skip blank lines between entries
+    while (i < lines.length && lines[i].trim() === '') i++;
+
+    // ── Validation ──────────────────────────────────────────────────
+    const ref = `Q${qNum}`;
+
     if (!questionText) {
-      errors.push({ ref: lineRef, issue: 'Question text is empty.' });
+      errors.push({ ref, issue: 'Question text is empty.' });
       continue;
     }
-    if (options.length < 4) {
-      errors.push({ ref: lineRef, issue: `Only ${options.length} options found — need exactly 4 (A, B, C, D).` });
+    if (!referenceAnswer) {
+      errors.push({ ref, issue: 'Missing "Answer:" line. Every question must have an answer.' });
       continue;
     }
-    if (correctAnswer === null || correctAnswer < 0) {
-      errors.push({ ref: lineRef, issue: 'Missing or invalid "Correct: <letter>" line.' });
+
+    // Duplicate detection (case-insensitive, whitespace-normalised)
+    const qKey = questionText.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (seenQuestions.has(qKey)) {
+      errors.push({ ref, issue: 'Duplicate question — already seen earlier in the same input.' });
       continue;
     }
+    seenQuestions.add(qKey);
 
     questions.push({
       question: questionText,
-      options: options.slice(0, 4),
-      correctAnswer,
+      referenceAnswer,
       explanation: explanation || '',
+      questionType: 'short_answer',
+      // Keep options/correctAnswer null so existing MCQ code is unaffected
+      options: [],
+      correctAnswer: null,
     });
   }
 

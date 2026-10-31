@@ -12,8 +12,12 @@ const savedTestSchema = new mongoose.Schema({
   questionCount: { type: Number, required: true },
   questions: [{
     question: { type: String, required: true },
+    // MCQ fields (used when questionType === 'mcq')
     options: [{ type: String }],
-    correctAnswer: { type: Number, required: true },
+    correctAnswer: { type: Number, default: null },   // 0-indexed; null for short_answer
+    // Short-answer fields (used when questionType === 'short_answer')
+    referenceAnswer: { type: String, default: '' },
+    questionType: { type: String, enum: ['mcq', 'short_answer'], default: 'mcq' },
     explanation: { type: String, default: '' },
     subject: String,
     topic: String,
