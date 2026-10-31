@@ -270,8 +270,6 @@ const AppContent = () => {
             token={token}
             user={user}
             onNavigate={handleNavigate}
-            socket={battleSocket}
-            socketConnected={socketConnected}
           />
         )}
 

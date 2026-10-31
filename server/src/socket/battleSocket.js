@@ -341,9 +341,11 @@ export const initializeBattleSocket = (io) => {
           _id: q._id,
           question: q.question,
           options: q.options,
+          questionType: q.questionType || 'mcq',
           subject: q.subject,
           topic: q.topic,
           difficulty: q.difficulty
+          // correctAnswer, referenceAnswer, explanation intentionally stripped
         }))
       });
 
@@ -515,6 +517,12 @@ async function finishBattle(room, io) {
 
     room.questions.forEach((q, idx) => {
       const selected = p.answers[idx];
+      // Short-answer questions: no auto-scoring yet (AI evaluation on hold)
+      // Do not penalise or reward — skip scoring entirely
+      if (q.questionType === 'short_answer') {
+        return;
+      }
+      // MCQ scoring
       if (selected !== undefined && selected !== -1) {
         if (selected === q.correctAnswer) {
           correct++;

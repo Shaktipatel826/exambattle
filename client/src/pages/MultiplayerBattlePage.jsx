@@ -36,7 +36,9 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
 
   // In-battle state
   const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [selectedAnswers, setSelectedAnswers] = useState({});  // { questionIndex: optionIndex }
+  const [selectedAnswers, setSelectedAnswers] = useState({});  // { questionIndex: optionIndex | string }
+  const [typedAnswers, setTypedAnswers] = useState({});           // { questionIndex: string } for short_answer
+  const [submittedShortAnswers, setSubmittedShortAnswers] = useState({});  // { questionIndex: true }
   const [leaderboard, setLeaderboard] = useState(null);
   const [reviewQuestions, setReviewQuestions] = useState([]);
   const [error, setError] = useState('');
@@ -177,6 +179,22 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
     }
   };
 
+  // ── Short-Answer Submission ──────────────────────────────────────────────────
+  const handleSubmitTypedAnswer = (qIndex) => {
+    const text = (typedAnswers[qIndex] || '').trim();
+    if (!text) return;
+    setSelectedAnswers(prev => ({ ...prev, [qIndex]: text }));
+    setSubmittedShortAnswers(prev => ({ ...prev, [qIndex]: true }));
+    if (socket && roomState) {
+      socket.emit('submit_answer', {
+        roomCode: roomState.roomCode,
+        userId: user.id || user._id,
+        questionIndex: qIndex,
+        selectedOptionIndex: text,
+      });
+    }
+  };
+
   const handleNext = () => {
     const questions = roomState?.questions || [];
     if (currentQIndex < questions.length - 1) {
@@ -195,15 +213,15 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
     if (!socket || !roomState || submitting) return;
     setSubmitting(true);
 
-    // Emit any unanswered questions as -1 (skip)
+    // Emit any unanswered questions as -1 (skip); short_answer uses empty string
     const questions = roomState.questions || [];
-    questions.forEach((_, idx) => {
+    questions.forEach((q, idx) => {
       if (selectedAnswers[idx] === undefined) {
         socket.emit('submit_answer', {
           roomCode: roomState.roomCode,
           userId: user.id || user._id,
           questionIndex: idx,
-          selectedOptionIndex: -1,
+          selectedOptionIndex: q.questionType === 'short_answer' ? '' : -1,
         });
       }
     });
@@ -217,6 +235,8 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
 
   const handleRematch = () => {
     setSelectedAnswers({});
+    setTypedAnswers({});
+    setSubmittedShortAnswers({});
     setCurrentQIndex(0);
     setLeaderboard(null);
     setReviewQuestions([]);
@@ -232,6 +252,8 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
     }
     setRoomState(null);
     setSelectedAnswers({});
+    setTypedAnswers({});
+    setSubmittedShortAnswers({});
     setCurrentQIndex(0);
     setLeaderboard(null);
     setSubmitting(false);
@@ -535,36 +557,59 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
             <h3 className="text-sm font-bold text-[#252525]">Question Review</h3>
             {reviewQuestions.map((q, idx) => {
               const myAns = selectedAnswers[idx];
-              const isCorrect = myAns === q.correctAnswer;
-              const isSkipped = myAns === undefined || myAns === -1;
+              const isShortAnswer = q.questionType === 'short_answer';
+              const isCorrect = !isShortAnswer && myAns === q.correctAnswer;
+              const isSkipped = myAns === undefined || myAns === -1 || myAns === '';
               return (
                 <div key={idx} className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] space-y-3">
                   <div className="flex justify-between items-start">
                     <span className="text-xs font-bold text-[#66635D]">Q{idx + 1}</span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      isSkipped ? 'bg-[#EFE9DC] text-[#66635D]' :
-                      isCorrect ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#FEE2E2] text-[#991B1B]'
+                      isShortAnswer ? 'bg-[#EFE9DC] text-[#244A73]'
+                      : isSkipped ? 'bg-[#EFE9DC] text-[#66635D]'
+                      : isCorrect ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#FEE2E2] text-[#991B1B]'
                     }`}>
-                      {isSkipped ? 'SKIPPED' : isCorrect ? '✓ CORRECT' : '✗ WRONG'}
+                      {isShortAnswer ? 'SHORT ANSWER'
+                        : isSkipped ? 'SKIPPED'
+                        : isCorrect ? '✓ CORRECT' : '✗ WRONG'}
                     </span>
                   </div>
                   <p className="text-sm font-bold text-[#252525]">{q.question}</p>
-                  <div className="grid grid-cols-1 gap-1.5">
-                    {q.options?.map((opt, oIdx) => {
-                      const isCorrectOpt = oIdx === q.correctAnswer;
-                      const isMyChoice = oIdx === myAns;
-                      let style = 'bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]';
-                      if (isCorrectOpt) style = 'bg-[#D1FAE5] border-[#10B981] text-[#065F46] font-bold';
-                      else if (isMyChoice && !isCorrectOpt) style = 'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-bold';
-                      return (
-                        <div key={oIdx} className={`px-3 py-2 rounded-lg border text-xs ${style}`}>
-                          <strong className="mr-2">{String.fromCharCode(65 + oIdx)}.</strong>{opt}
-                          {isCorrectOpt && <span className="ml-2 text-[10px]">(Correct)</span>}
-                          {isMyChoice && !isCorrectOpt && <span className="ml-2 text-[10px]">(Your answer)</span>}
+                  {isShortAnswer ? (
+                    <div className="space-y-1.5">
+                      {myAns && typeof myAns === 'string' && myAns.trim() ? (
+                        <div className="px-3 py-2 rounded-lg border text-xs bg-[#EFE9DC] border-[#D5CDBF] text-[#252525]">
+                          <strong className="text-[#244A73] mr-1">Your answer:</strong> {myAns}
                         </div>
-                      );
-                    })}
-                  </div>
+                      ) : (
+                        <div className="px-3 py-2 rounded-lg border text-xs bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]">
+                          No answer submitted
+                        </div>
+                      )}
+                      {q.referenceAnswer && (
+                        <div className="px-3 py-2 rounded-lg border text-xs bg-[#D1FAE5] border-[#10B981] text-[#065F46]">
+                          <strong className="mr-1">Reference Answer:</strong> {q.referenceAnswer}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {q.options?.map((opt, oIdx) => {
+                        const isCorrectOpt = oIdx === q.correctAnswer;
+                        const isMyChoice = oIdx === myAns;
+                        let style = 'bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]';
+                        if (isCorrectOpt) style = 'bg-[#D1FAE5] border-[#10B981] text-[#065F46] font-bold';
+                        else if (isMyChoice && !isCorrectOpt) style = 'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-bold';
+                        return (
+                          <div key={oIdx} className={`px-3 py-2 rounded-lg border text-xs ${style}`}>
+                            <strong className="mr-2">{String.fromCharCode(65 + oIdx)}.</strong>{opt}
+                            {isCorrectOpt && <span className="ml-2 text-[10px]">(Correct)</span>}
+                            {isMyChoice && !isCorrectOpt && <span className="ml-2 text-[10px]">(Your answer)</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {q.explanation && (
                     <p className="text-[11px] text-[#252525] bg-[#F7F3EA] p-2.5 rounded-lg border border-[#E2DACB]">
                       <strong className="text-[#244A73]">Explanation: </strong>{q.explanation}
@@ -585,9 +630,12 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
   const questions = roomState?.questions || [];
   const currentQ = questions[currentQIndex];
   const totalQ = questions.length;
-  const isAnswered = selectedAnswers[currentQIndex] !== undefined;
+  const isAnswered = selectedAnswers[currentQIndex] !== undefined && selectedAnswers[currentQIndex] !== '';
   const isLastQuestion = currentQIndex === totalQ - 1;
-  const answeredCount = Object.keys(selectedAnswers).filter(k => selectedAnswers[k] !== undefined && selectedAnswers[k] !== -1).length;
+  const answeredCount = Object.keys(selectedAnswers).filter(k => {
+    const v = selectedAnswers[k];
+    return v !== undefined && v !== -1 && v !== '';
+  }).length;
   const isTimeLow = timeLeft > 0 && timeLeft < 60;
 
   return (
@@ -662,29 +710,58 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
             {currentQ.question}
           </p>
 
-          {/* Options */}
-          <div className="space-y-2.5">
-            {(currentQ.options || []).map((opt, oIdx) => {
-              const isChosen = selectedAnswers[currentQIndex] === oIdx;
-              return (
-                <button
-                  key={oIdx}
-                  onClick={() => handleSelectAnswer(oIdx)}
-                  className={`w-full text-left p-3.5 rounded-xl border text-xs sm:text-sm font-semibold transition-all flex items-center justify-between ${
-                    isChosen
-                      ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73] font-black shadow-sm'
-                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525] hover:border-[#244A73] hover:bg-[#EFE9DC]/50'
-                  }`}
-                >
-                  <span>
-                    <strong className="mr-2 text-[#244A73]">{String.fromCharCode(65 + oIdx)}.</strong>
-                    {opt}
-                  </span>
-                  {isChosen && <CheckCircle2 className="w-5 h-5 text-[#244A73] shrink-0" />}
-                </button>
-              );
-            })}
-          </div>
+          {/* Options — MCQ or Short Answer */}
+          {currentQ.questionType === 'short_answer' ? (
+            <div className="space-y-3">
+              <p className="text-xs text-[#66635D] font-semibold">Type your answer below:</p>
+              <textarea
+                value={typedAnswers[currentQIndex] || ''}
+                onChange={e => setTypedAnswers(prev => ({ ...prev, [currentQIndex]: e.target.value }))}
+                placeholder="Type your answer here…"
+                rows={3}
+                disabled={submittedShortAnswers[currentQIndex]}
+                className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-sm resize-none focus:outline-none focus:border-[#244A73] disabled:opacity-60"
+                dir="auto"
+              />
+              <button
+                onClick={() => handleSubmitTypedAnswer(currentQIndex)}
+                disabled={!typedAnswers[currentQIndex]?.trim() || submittedShortAnswers[currentQIndex]}
+                className="w-full py-2.5 bg-[#244A73] text-white text-xs font-bold rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 transition-colors hover:bg-[#1a3a5c]"
+              >
+                {submittedShortAnswers[currentQIndex]
+                  ? <><CheckCircle2 className="w-4 h-4" /> Answer Submitted</>
+                  : 'Submit Answer'}
+              </button>
+              {submittedShortAnswers[currentQIndex] && (
+                <p className="text-[11px] text-[#66635D] text-center">
+                  Answer recorded. You can move to the next question.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {(currentQ.options || []).map((opt, oIdx) => {
+                const isChosen = selectedAnswers[currentQIndex] === oIdx;
+                return (
+                  <button
+                    key={oIdx}
+                    onClick={() => handleSelectAnswer(oIdx)}
+                    className={`w-full text-left p-3.5 rounded-xl border text-xs sm:text-sm font-semibold transition-all flex items-center justify-between ${
+                      isChosen
+                        ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73] font-black shadow-sm'
+                        : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525] hover:border-[#244A73] hover:bg-[#EFE9DC]/50'
+                    }`}
+                  >
+                    <span>
+                      <strong className="mr-2 text-[#244A73]">{String.fromCharCode(65 + oIdx)}.</strong>
+                      {opt}
+                    </span>
+                    {isChosen && <CheckCircle2 className="w-5 h-5 text-[#244A73] shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* ── Navigation Controls ── */}
           <div className="border-t border-[#E2DACB] pt-4 flex items-center justify-between gap-3">
