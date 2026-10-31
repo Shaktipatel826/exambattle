@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import {
   Swords, Users, Clock, Trophy, Play, RotateCcw, AlertCircle, CheckCircle2,
-  ArrowRight, ArrowLeft, ChevronRight, Share2, Copy
+  ArrowRight, ArrowLeft, ChevronRight, Share2, Copy, Loader2
 } from 'lucide-react';
 import { getSocketUrl } from '../lib/apiConfig';
 
@@ -45,6 +45,8 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
   const [timeLeft, setTimeLeft] = useState(0);
   const [copied, setCopied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [startBattleError, setStartBattleError] = useState('');
+  const [startingBattle, setStartingBattle] = useState(false);
 
   // ── Socket Setup ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -68,6 +70,18 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
       setSelectedAnswers({});
       const remainingSecs = Math.floor((endTime - Date.now()) / 1000);
       setTimeLeft(Math.max(0, remainingSecs));
+    });
+
+    newSocket.on('reconnect', () => {
+      console.log('[Battle] Socket reconnected — re-joining room');
+      setRoomState(prev => {
+        if (prev?.roomCode && prev.status === 'LOBBY') {
+          newSocket.emit('join_room', { roomCode: prev.roomCode, user }, (response) => {
+            if (response?.success) setRoomState(response.room);
+          });
+        }
+        return prev;
+      });
     });
 
     newSocket.on('battle_finished', ({ leaderboard, questions }) => {
@@ -153,8 +167,29 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
   };
 
   const handleStartBattle = () => {
-    if (!socket || !roomState) return;
-    socket.emit('start_battle', { roomCode: roomState.roomCode, userId: user.id || user._id });
+    if (!socket || !roomState || startingBattle) return;
+    setStartBattleError('');
+    setStartingBattle(true);
+    console.log('[Battle] Emitting start_battle:', { roomCode: roomState.roomCode, userId: user.id || user._id });
+
+    // Timeout if server doesn't ack within 8s (e.g. server restarted, room lost)
+    const timeoutId = setTimeout(() => {
+      setStartingBattle(false);
+      setStartBattleError('Battle server did not respond. The room may have expired — please create a new room.');
+    }, 8000);
+
+    socket.emit(
+      'start_battle',
+      { roomCode: roomState.roomCode, userId: user.id || user._id },
+      (response) => {
+        clearTimeout(timeoutId);
+        setStartingBattle(false);
+        console.log('[Battle] start_battle ack:', response);
+        if (response && !response.success) {
+          setStartBattleError(response.message || 'Failed to start battle. Please try again.');
+        }
+      }
+    );
   };
 
   const handleCopyCode = () => {
@@ -241,6 +276,8 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
     setLeaderboard(null);
     setReviewQuestions([]);
     setSubmitting(false);
+    setStartBattleError('');
+    setStartingBattle(false);
     if (socket && roomState) {
       socket.emit('request_rematch', { roomCode: roomState.roomCode, userId: user.id || user._id });
     }
@@ -257,6 +294,8 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
     setCurrentQIndex(0);
     setLeaderboard(null);
     setSubmitting(false);
+    setStartBattleError('');
+    setStartingBattle(false);
     setError('');
   };
 
@@ -461,13 +500,22 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
           </div>
 
           <div className="space-y-2">
+            {startBattleError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {startBattleError}
+              </div>
+            )}
             {isHost ? (
               <button
                 onClick={handleStartBattle}
-                disabled={roomState.players.length < 1}
+                disabled={roomState.players.length < 1 || startingBattle}
                 className="w-full py-4 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                <Play className="w-4 h-4 fill-white" /> START BATTLE NOW
+                {startingBattle ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Starting…</>
+                ) : (
+                  <><Play className="w-4 h-4 fill-white" /> START BATTLE NOW</>
+                )}
               </button>
             ) : (
               <p className="text-xs text-[#244A73] font-semibold animate-pulse py-4">

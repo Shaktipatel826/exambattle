@@ -346,12 +346,43 @@ export const initializeBattleSocket = (io) => {
 
     // Start Battle (Host Only)
     socket.on('start_battle', ({ roomCode, userId }, callback) => {
-      const cleanCode = roomCode.trim().toUpperCase();
-      const room = activeRooms.get(cleanCode);
-      if (!room) return;
+      const cleanCode = (roomCode || '').trim().toUpperCase();
+      console.log(`[Battle] start_battle received: room=${cleanCode}, userId=${userId}, socketId=${socket.id}`);
 
-      if (room.hostId !== userId) {
-        if (typeof callback === 'function') callback({ success: false, message: 'Only host can start the battle.' });
+      const room = activeRooms.get(cleanCode);
+      if (!room) {
+        console.warn(`[Battle] start_battle failed: room ${cleanCode} not found (server may have restarted)`);
+        if (typeof callback === 'function') callback({ success: false, message: 'Room not found. The server may have restarted — please create a new room.' });
+        return;
+      }
+
+      console.log(`[Battle] room found: hostId=${room.hostId}, status=${room.status}, players=${room.players.length}`);
+
+      // Idempotent: if already IN_PROGRESS, re-broadcast so reconnected players can catch up
+      if (room.status === 'IN_PROGRESS') {
+        console.log(`[Battle] room ${cleanCode} already IN_PROGRESS — re-emitting battle_started`);
+        io.to(cleanCode).emit('battle_started', {
+          status: 'IN_PROGRESS',
+          startTime: room.startTime,
+          endTime: room.endTime,
+          questions: room.questions.map(q => ({
+            _id: q._id,
+            question: q.question,
+            options: q.options,
+            questionType: q.questionType || 'mcq',
+            subject: q.subject,
+            topic: q.topic,
+            difficulty: q.difficulty
+          }))
+        });
+        if (typeof callback === 'function') callback({ success: true });
+        return;
+      }
+
+      // Compare as strings to avoid type mismatch (ObjectId vs string)
+      if (String(room.hostId) !== String(userId)) {
+        console.warn(`[Battle] start_battle rejected: room.hostId=${room.hostId} !== userId=${userId}`);
+        if (typeof callback === 'function') callback({ success: false, message: 'Only the host can start the battle.' });
         return;
       }
 
@@ -359,6 +390,8 @@ export const initializeBattleSocket = (io) => {
       room.status = 'IN_PROGRESS';
       room.startTime = Date.now();
       room.endTime = room.startTime + durationMs;
+
+      console.log(`[Battle] Starting battle in room ${cleanCode}: ${room.questions.length} questions, ${room.config.timeLimitMinutes} min`);
 
       // SECURITY: Strip correct answers and explanations before starting live battle
       io.to(cleanCode).emit('battle_started', {
