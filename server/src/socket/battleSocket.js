@@ -393,6 +393,15 @@ export const initializeBattleSocket = (io) => {
 
       console.log(`[Battle] Starting battle in room ${cleanCode}: ${room.questions.length} questions, ${room.config.timeLimitMinutes} min`);
 
+      // Auto-finish when timer expires (server-side safety net)
+      room._timerTimeout = setTimeout(async () => {
+        const currentRoom = activeRooms.get(cleanCode);
+        if (currentRoom && currentRoom.status === 'IN_PROGRESS') {
+          console.log(`[Battle] Timer expired for room ${cleanCode} — auto-finishing`);
+          await finishBattle(currentRoom, io);
+        }
+      }, durationMs + 5000); // 5s grace period after timer
+
       // SECURITY: Strip correct answers and explanations before starting live battle
       io.to(cleanCode).emit('battle_started', {
         status: 'IN_PROGRESS',
@@ -449,6 +458,7 @@ export const initializeBattleSocket = (io) => {
 
       const allFinished = room.players.every(p => Object.keys(p.answers).length >= room.questions.length);
       if (allFinished) {
+        console.log(`[Battle] All players answered all questions in room ${room.roomCode} — auto-finishing`);
         await finishBattle(room, io);
       }
     });
@@ -478,11 +488,19 @@ export const initializeBattleSocket = (io) => {
       const player = room.players.find(p => p.userId === userId);
       // SECURITY: Only the owning socket may mark this player as finished
       if (!player || player.socketId !== socket.id) return;
+
+      if (player.finished) {
+        console.log(`[Battle] player_finished: ${userId} already marked finished in room ${cleanCode} — ignoring duplicate`);
+        return;
+      }
+
       player.finished = true;
+      console.log(`[Battle] player_finished: ${userId} in room ${cleanCode}. Finished: ${room.players.filter(p => p.finished).length}/${room.players.length}`);
 
       // If all players have finished, or only 1 player in room → end immediately
       const allDone = room.players.every(p => p.finished);
       if (allDone || room.players.length === 1) {
+        console.log(`[Battle] All players done in room ${cleanCode} — finishing battle`);
         await finishBattle(room, io);
       } else {
         // Notify others that this player finished
@@ -496,6 +514,17 @@ export const initializeBattleSocket = (io) => {
             totalSubmitted: Object.keys(p.answers).length
           }))
         });
+
+        // ── TIMEOUT: If other player(s) haven't finished within 5 minutes, end anyway ──
+        if (!room._finishTimeout) {
+          room._finishTimeout = setTimeout(async () => {
+            const currentRoom = activeRooms.get(cleanCode);
+            if (currentRoom && currentRoom.status === 'IN_PROGRESS') {
+              console.log(`[Battle] Timeout: force-finishing room ${cleanCode} after 5 min wait`);
+              await finishBattle(currentRoom, io);
+            }
+          }, 5 * 60 * 1000); // 5 minutes max wait
+        }
       }
     });
 
@@ -569,7 +598,18 @@ function sanitizeRoomState(room) {
 
 
 async function finishBattle(room, io) {
+  // Guard against double-invocation (timer + player_finished race)
+  if (room.status === 'FINISHED') {
+    console.log(`[Battle] finishBattle called on already-FINISHED room ${room.roomCode} — skipping`);
+    return;
+  }
   room.status = 'FINISHED';
+
+  // Clear any pending timeouts
+  if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+  if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
+
+  console.log(`[Battle] finishBattle: scoring ${room.players.length} players in room ${room.roomCode}`);
 
   room.players.forEach(p => {
     let correct = 0;
@@ -664,9 +704,13 @@ async function finishBattle(room, io) {
       wrongCount: p.wrongCount,
       unattemptedCount: p.unattemptedCount,
       answerScores: p.answerScores || {},
+      // Include submitted answers so ALL players can see comparative review
+      submittedAnswers: p.answers || {},
     })),
     questions: room.questions   // includes referenceAnswer — revealed only after finish
   });
+
+  console.log(`[Battle] battle_finished broadcast to room ${room.roomCode}: ${room.players.map(p => `${p.name}=${p.score}pts`).join(', ')}`);
 }
 
 function getFallbackBattleQuestions(count, subject) {

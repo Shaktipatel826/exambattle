@@ -85,6 +85,12 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
     });
 
     newSocket.on('battle_finished', ({ leaderboard, questions }) => {
+      // Clear safety-net timeout if present
+      if (newSocket._finishTimeoutId) {
+        clearTimeout(newSocket._finishTimeoutId);
+        newSocket._finishTimeoutId = null;
+      }
+      setSubmitting(false);
       setLeaderboard(leaderboard);
       if (questions) setReviewQuestions(questions);
       setRoomState(prev => prev ? { ...prev, status: 'FINISHED' } : prev);
@@ -266,7 +272,16 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
       roomCode: roomState.roomCode,
       userId: user.id || user._id,
     });
-  }, [socket, roomState, selectedAnswers, submitting]);
+
+    // Safety net: if battle_finished not received within 30s, show error
+    const timeoutId = setTimeout(() => {
+      setSubmitting(false);
+      setError('Results are taking too long to arrive. Please wait or refresh if results still do not appear.');
+    }, 30000);
+
+    // Store timeout id so we can clear it when battle_finished arrives
+    socket._finishTimeoutId = timeoutId;
+  }, [socket, roomState, selectedAnswers, submitting, user]);
 
   const handleRematch = () => {
     setSelectedAnswers({});
@@ -535,169 +550,247 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // VIEW 3: Results / Leaderboard
+  // VIEW 3: Results / Leaderboard — Full Comparative Dashboard
   // ═══════════════════════════════════════════════════════════════════════════
   if (roomState.status === 'FINISHED' && leaderboard) {
-    const myEntry = leaderboard.find(p => p.userId === (user.id || user._id));
+    const myId = user.id || user._id;
+    const myEntry = leaderboard.find(p => p.userId === myId);
+    const winner = leaderboard[0]; // sorted by score desc server-side
+    const isTie = leaderboard.length > 1 && leaderboard[0].score === leaderboard[1].score;
+    const totalQs = reviewQuestions.length;
+
+    // Helper: get a player's answer for question idx
+    const getPlayerAnswer = (entry, idx) => {
+      if (!entry) return undefined;
+      const ans = entry.submittedAnswers?.[idx];
+      return ans;
+    };
+
+    // Helper: answer status for a question
+    const getStatus = (entry, question, idx) => {
+      const ans = getPlayerAnswer(entry, idx);
+      const isShort = question.questionType === 'short_answer';
+      if (ans === undefined || ans === null || ans === '' || ans === -1) return 'SKIPPED';
+      if (isShort) {
+        const pct = entry.answerScores?.[idx] ?? 0;
+        if (pct === 100) return 'CORRECT';
+        if (pct > 0) return 'PARTIAL';
+        return 'WRONG';
+      }
+      return ans === question.correctAnswer ? 'CORRECT' : 'WRONG';
+    };
+
+    const statusStyle = {
+      CORRECT:  'bg-green-100 text-green-800 border-green-200',
+      PARTIAL:  'bg-amber-100 text-amber-800 border-amber-200',
+      WRONG:    'bg-red-100 text-red-800 border-red-200',
+      SKIPPED:  'bg-[#F7F3EA] text-[#66635D] border-[#E2DACB]',
+    };
+    const statusLabel = {
+      CORRECT: '✓ Correct',
+      PARTIAL: '◑ Partial',
+      WRONG:   '✗ Wrong',
+      SKIPPED: '— Skipped',
+    };
+
+    const medals = ['🥇', '🥈', '🥉'];
+
     return (
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
-        {/* Leaderboard Card */}
-        <div className="bg-[#FFFDF8] p-8 rounded-3xl border border-[#E2DACB] shadow-sm text-center space-y-6">
-          <div className="w-16 h-16 mx-auto rounded-full bg-[#EFE9DC] flex items-center justify-center border border-[#E2DACB]">
-            <Trophy className="w-8 h-8 text-[#244A73]" />
+        {/* ── Winner Banner ── */}
+        <div className="bg-[#244A73] p-6 rounded-2xl text-center space-y-1 shadow-sm">
+          <div className="text-3xl">{isTie ? '🤝' : '🏆'}</div>
+          <h2 className="text-2xl font-black text-white">
+            {isTie ? 'IT\'S A TIE!' : `${winner.name} WINS!`}
+          </h2>
+          <p className="text-white/70 text-xs">
+            {isTie ? `Both players scored ${winner.score} pts` : `${winner.score} pts — by score (incl. partial marks)`}
+          </p>
+        </div>
+
+        {/* ── Overall Comparison Table ── */}
+        <div className="bg-[#FFFDF8] rounded-2xl border border-[#E2DACB] overflow-hidden shadow-sm">
+          <div className="px-5 py-3 border-b border-[#E2DACB] bg-[#F7F3EA]">
+            <h3 className="text-xs font-black text-[#252525] uppercase tracking-wider">Battle Comparison</h3>
           </div>
-          <h2 className="text-2xl font-black text-[#252525]">BATTLE RESULTS</h2>
-
-          {myEntry && (
-            <div className="p-4 rounded-xl bg-[#EFE9DC] border border-[#244A73] text-sm space-y-2">
-              <p className="text-xs text-[#66635D] font-semibold">Your Score</p>
-              <p className="text-3xl font-black text-[#244A73]">{myEntry.score} <span className="text-base font-bold">pts</span></p>
-              <div className="flex flex-wrap justify-center gap-2 text-[11px]">
-                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-bold">✓ {myEntry.correctCount} correct</span>
-                {myEntry.partialCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">◑ {myEntry.partialCount} partial</span>
-                )}
-                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-bold">✗ {myEntry.wrongCount} wrong</span>
-                <span className="px-2 py-0.5 rounded-full bg-[#F7F3EA] border border-[#E2DACB] text-[#66635D] font-bold">— {myEntry.unattemptedCount} skipped</span>
-              </div>
-              <p className="text-xs text-[#244A73] font-bold">{myEntry.accuracy}% accuracy</p>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {leaderboard.map((item) => {
-              const medals = ['🥇', '🥈', '🥉'];
-              const isMe = item.userId === (user.id || user._id);
-              return (
-                <div
-                  key={item.userId}
-                  className={`flex items-center justify-between p-4 rounded-xl border text-xs font-bold ${
-                    isMe
-                      ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73]'
-                      : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-base">{medals[item.rank - 1] || `#${item.rank}`}</span>
-                    <span>{item.name} {isMe && '(You)'}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-sm font-black text-[#244A73] block">{item.score} pts</span>
-                    <span className="text-[10px] text-[#66635D] font-normal">
-                      {item.correctCount}✓{item.partialCount > 0 ? ` ${item.partialCount}◑` : ''} {item.wrongCount}✗ · {item.accuracy}%
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={handleRematch}
-              className="py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2"
-            >
-              <RotateCcw className="w-4 h-4" /> Rematch
-            </button>
-            <button
-              onClick={handleLeaveRoom}
-              className="py-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#252525] font-bold text-xs uppercase"
-            >
-              Exit
-            </button>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[#E2DACB]">
+                  <th className="text-left px-4 py-3 font-bold text-[#66635D] w-36">Performance</th>
+                  {leaderboard.map(p => (
+                    <th key={p.userId} className={`px-4 py-3 font-black text-center ${p.userId === myId ? 'text-[#244A73]' : 'text-[#252525]'}`}>
+                      {medals[p.rank - 1] || `#${p.rank}`} {p.name}
+                      {p.userId === myId && <span className="text-[10px] font-normal text-[#66635D] block">(You)</span>}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#E2DACB]">
+                {[
+                  ['Total Questions', () => totalQs],
+                  ['Fully Correct', p => p.correctCount],
+                  ['Partially Correct', p => p.partialCount || 0],
+                  ['Wrong', p => p.wrongCount],
+                  ['Skipped', p => p.unattemptedCount],
+                  ['Total Score (pts)', p => p.score],
+                  ['Score %', p => `${p.accuracy}%`],
+                ].map(([label, getValue]) => (
+                  <tr key={label} className="hover:bg-[#F7F3EA] transition-colors">
+                    <td className="px-4 py-2.5 font-semibold text-[#66635D]">{label}</td>
+                    {leaderboard.map(p => (
+                      <td key={p.userId} className={`px-4 py-2.5 text-center font-bold ${p.userId === myId ? 'text-[#244A73]' : 'text-[#252525]'}`}>
+                        {typeof getValue === 'function' && getValue.length === 0 ? getValue() : getValue(p)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
 
-        {/* Question Review */}
-        {reviewQuestions.length > 0 && (
-          <div className="space-y-3">
-            <h3 className="text-sm font-bold text-[#252525]">Question Review</h3>
-            {reviewQuestions.map((q, idx) => {
-              const myAns = selectedAnswers[idx];
-              const isShortAnswer = q.questionType === 'short_answer';
-              // Per-question proximity score (0-100) from server — only for short_answer
-              const qScore = myEntry?.answerScores?.[idx] ?? null;
-              const isCorrect = !isShortAnswer && myAns === q.correctAnswer;
-              const isSkipped = myAns === undefined || myAns === -1 || myAns === '';
-
-              // Short-answer status label based on proximity score
-              const saStatus = isSkipped ? 'SKIPPED'
-                : qScore === 100 ? '✓ CORRECT'
-                : qScore > 0    ? `◑ ${qScore}%`
-                : '✗ WRONG';
-              const saStyle = isSkipped ? 'bg-[#EFE9DC] text-[#66635D]'
-                : qScore === 100 ? 'bg-[#D1FAE5] text-[#065F46]'
-                : qScore > 0    ? 'bg-amber-100 text-amber-800'
-                : 'bg-[#FEE2E2] text-[#991B1B]';
-
-              return (
-                <div key={idx} className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-bold text-[#66635D]">Q{idx + 1}</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      isShortAnswer ? saStyle
-                      : isSkipped ? 'bg-[#EFE9DC] text-[#66635D]'
-                      : isCorrect ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#FEE2E2] text-[#991B1B]'
-                    }`}>
-                      {isShortAnswer ? saStatus
-                        : isSkipped ? 'SKIPPED'
-                        : isCorrect ? '✓ CORRECT' : '✗ WRONG'}
+        {/* ── Leaderboard Cards ── */}
+        <div className="space-y-2">
+          {leaderboard.map(item => {
+            const isMe = item.userId === myId;
+            return (
+              <div
+                key={item.userId}
+                className={`flex items-center justify-between p-4 rounded-xl border text-xs font-bold ${
+                  isMe ? 'bg-[#EFE9DC] border-[#244A73] text-[#244A73]' : 'bg-[#F7F3EA] border-[#E2DACB] text-[#252525]'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-base">{medals[item.rank - 1] || `#${item.rank}`}</span>
+                  <div>
+                    <span className="block">{item.name} {isMe && '(You)'}</span>
+                    <span className="text-[10px] font-normal text-[#66635D]">
+                      {item.correctCount}✓ {item.partialCount > 0 ? `${item.partialCount}◑ ` : ''}{item.wrongCount}✗ {item.unattemptedCount}—
                     </span>
                   </div>
-                  <p className="text-sm font-bold text-[#252525]">{q.question}</p>
-                  {isShortAnswer ? (
-                    <div className="space-y-1.5">
-                      {myAns && typeof myAns === 'string' && myAns.trim() ? (
-                        <div className="px-3 py-2 rounded-lg border text-xs bg-[#EFE9DC] border-[#D5CDBF] text-[#252525]">
-                          <strong className="text-[#244A73] mr-1">Your answer:</strong> {myAns}
-                        </div>
-                      ) : (
-                        <div className="px-3 py-2 rounded-lg border text-xs bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]">
-                          No answer submitted
-                        </div>
-                      )}
-                      {q.referenceAnswer && (
-                        <div className="px-3 py-2 rounded-lg border text-xs bg-[#D1FAE5] border-[#10B981] text-[#065F46]">
-                          <strong className="mr-1">Reference Answer:</strong> {q.referenceAnswer}
-                        </div>
-                      )}
-                      {qScore !== null && !isSkipped && (
-                        <div className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 ${
-                          qScore === 100 ? 'bg-green-50 border-green-200 text-green-700'
-                          : qScore > 0   ? 'bg-amber-50 border-amber-200 text-amber-700'
-                          : 'bg-red-50 border-red-200 text-red-700'
-                        }`}>
-                          Score: {qScore}/100
-                          {qScore === 100 && ' — Perfect!'}
-                          {qScore > 0 && qScore < 100 && ' — Partial credit'}
-                          {qScore === 0 && ' — No credit'}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-1.5">
-                      {q.options?.map((opt, oIdx) => {
-                        const isCorrectOpt = oIdx === q.correctAnswer;
-                        const isMyChoice = oIdx === myAns;
-                        let style = 'bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]';
-                        if (isCorrectOpt) style = 'bg-[#D1FAE5] border-[#10B981] text-[#065F46] font-bold';
-                        else if (isMyChoice && !isCorrectOpt) style = 'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-bold';
+                </div>
+                <div className="text-right">
+                  <span className="text-sm font-black text-[#244A73] block">{item.score} pts</span>
+                  <span className="text-[10px] text-[#66635D] font-normal">{item.accuracy}% accuracy</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Buttons ── */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={handleRematch}
+            className="py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+          >
+            <RotateCcw className="w-4 h-4" /> Rematch
+          </button>
+          <button
+            onClick={handleLeaveRoom}
+            className="py-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#252525] font-bold text-xs uppercase"
+          >
+            Exit
+          </button>
+        </div>
+
+        {/* ── Question-wise Comparative Review ── */}
+        {reviewQuestions.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-black text-[#252525] uppercase tracking-wide">Question-wise Comparison</h3>
+
+            {reviewQuestions.map((q, idx) => {
+              const isShort = q.questionType === 'short_answer';
+
+              return (
+                <div key={idx} className="bg-[#FFFDF8] rounded-2xl border border-[#E2DACB] overflow-hidden shadow-sm">
+                  {/* Question header */}
+                  <div className="bg-[#F7F3EA] px-4 py-2.5 border-b border-[#E2DACB] flex items-center justify-between">
+                    <span className="text-xs font-black text-[#244A73]">Q{idx + 1}</span>
+                    <span className="text-[10px] text-[#66635D] font-semibold">{q.topic || q.subject}</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <p className="text-sm font-bold text-[#252525] leading-relaxed">{q.question}</p>
+
+                    {/* Reference Answer */}
+                    {(isShort && q.referenceAnswer) && (
+                      <div className="px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800">
+                        <strong>Reference Answer:</strong> {q.referenceAnswer}
+                      </div>
+                    )}
+                    {!isShort && q.correctAnswer !== undefined && (
+                      <div className="px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800">
+                        <strong>Correct Answer:</strong> {String.fromCharCode(65 + q.correctAnswer)}. {q.options?.[q.correctAnswer]}
+                      </div>
+                    )}
+
+                    {/* Per-player answers */}
+                    <div className={`grid gap-3 ${leaderboard.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                      {leaderboard.map(entry => {
+                        const status = getStatus(entry, q, idx);
+                        const ans = getPlayerAnswer(entry, idx);
+                        const pct = entry.answerScores?.[idx] ?? null;
+                        const isMe = entry.userId === myId;
+
+                        let answerDisplay = '—';
+                        if (isShort) {
+                          answerDisplay = (ans !== undefined && ans !== null && ans !== '' && ans !== -1)
+                            ? String(ans) : 'No answer';
+                        } else {
+                          if (ans !== undefined && ans !== null && ans !== '' && ans !== -1) {
+                            answerDisplay = `${String.fromCharCode(65 + ans)}. ${q.options?.[ans] || ''}`;
+                          } else {
+                            answerDisplay = 'Skipped';
+                          }
+                        }
+
                         return (
-                          <div key={oIdx} className={`px-3 py-2 rounded-lg border text-xs ${style}`}>
-                            <strong className="mr-2">{String.fromCharCode(65 + oIdx)}.</strong>{opt}
-                            {isCorrectOpt && <span className="ml-2 text-[10px]">(Correct)</span>}
-                            {isMyChoice && !isCorrectOpt && <span className="ml-2 text-[10px]">(Your answer)</span>}
+                          <div key={entry.userId} className={`p-3 rounded-xl border ${isMe ? 'border-[#244A73] bg-[#EFE9DC]' : 'border-[#E2DACB] bg-[#F7F3EA]'}`}>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-[11px] font-black text-[#252525]">
+                                {medals[entry.rank - 1] || `#${entry.rank}`} {entry.name} {isMe && '(You)'}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${statusStyle[status]}`}>
+                                {statusLabel[status]}
+                                {isShort && pct !== null && status !== 'SKIPPED' && ` · ${pct}%`}
+                              </span>
+                            </div>
+                            <p className="text-xs text-[#252525] font-medium">{answerDisplay}</p>
                           </div>
                         );
                       })}
                     </div>
-                  )}
-                  {q.explanation && (
-                    <p className="text-[11px] text-[#252525] bg-[#F7F3EA] p-2.5 rounded-lg border border-[#E2DACB]">
-                      <strong className="text-[#244A73]">Explanation: </strong>{q.explanation}
-                    </p>
-                  )}
+
+                    {/* MCQ options for context */}
+                    {!isShort && q.options && (
+                      <div className="grid grid-cols-1 gap-1 mt-1">
+                        {q.options.map((opt, oIdx) => {
+                          const isCorrectOpt = oIdx === q.correctAnswer;
+                          return (
+                            <div
+                              key={oIdx}
+                              className={`px-3 py-1.5 rounded-lg border text-[11px] ${
+                                isCorrectOpt
+                                  ? 'bg-green-50 border-green-200 text-green-800 font-bold'
+                                  : 'bg-[#F7F3EA] border-[#E2DACB] text-[#66635D]'
+                              }`}
+                            >
+                              <strong className="mr-1.5">{String.fromCharCode(65 + oIdx)}.</strong>{opt}
+                              {isCorrectOpt && <span className="ml-2 text-[10px]">(Correct)</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {q.explanation && (
+                      <p className="text-[11px] text-[#252525] bg-[#F7F3EA] p-2.5 rounded-lg border border-[#E2DACB]">
+                        <strong className="text-[#244A73]">Explanation: </strong>{q.explanation}
+                      </p>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -720,6 +813,25 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
     return v !== undefined && v !== -1 && v !== '';
   }).length;
   const isTimeLow = timeLeft > 0 && timeLeft < 60;
+
+  // ── "Waiting for results" overlay ─────────────────────────────────────────
+  if (submitting) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8 space-y-4">
+        <div className="bg-[#FFFDF8] p-10 rounded-2xl border border-[#E2DACB] shadow-sm text-center space-y-4">
+          <Loader2 className="w-10 h-10 text-[#244A73] animate-spin mx-auto" />
+          <h2 className="text-lg font-black text-[#252525]">Exam Submitted!</h2>
+          <p className="text-sm text-[#66635D]">Waiting for all players to finish…</p>
+          <p className="text-xs text-[#66635D]">Results will appear automatically once everyone is done.</p>
+          {error && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-xl flex items-center gap-2 justify-center">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
