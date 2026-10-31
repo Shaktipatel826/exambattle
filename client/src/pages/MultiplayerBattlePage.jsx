@@ -502,10 +502,18 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
           <h2 className="text-2xl font-black text-[#252525]">BATTLE RESULTS</h2>
 
           {myEntry && (
-            <div className="p-4 rounded-xl bg-[#EFE9DC] border border-[#244A73] text-sm">
+            <div className="p-4 rounded-xl bg-[#EFE9DC] border border-[#244A73] text-sm space-y-2">
               <p className="text-xs text-[#66635D] font-semibold">Your Score</p>
               <p className="text-3xl font-black text-[#244A73]">{myEntry.score} <span className="text-base font-bold">pts</span></p>
-              <p className="text-xs text-[#66635D]">{myEntry.correctCount} correct · {myEntry.wrongCount} wrong · {myEntry.accuracy}% accuracy</p>
+              <div className="flex flex-wrap justify-center gap-2 text-[11px]">
+                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-bold">✓ {myEntry.correctCount} correct</span>
+                {myEntry.partialCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">◑ {myEntry.partialCount} partial</span>
+                )}
+                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800 font-bold">✗ {myEntry.wrongCount} wrong</span>
+                <span className="px-2 py-0.5 rounded-full bg-[#F7F3EA] border border-[#E2DACB] text-[#66635D] font-bold">— {myEntry.unattemptedCount} skipped</span>
+              </div>
+              <p className="text-xs text-[#244A73] font-bold">{myEntry.accuracy}% accuracy</p>
             </div>
           )}
 
@@ -528,7 +536,9 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
                   </div>
                   <div className="text-right">
                     <span className="text-sm font-black text-[#244A73] block">{item.score} pts</span>
-                    <span className="text-[10px] text-[#66635D] font-normal">{item.correctCount}✓ {item.wrongCount}✗ · {item.accuracy}%</span>
+                    <span className="text-[10px] text-[#66635D] font-normal">
+                      {item.correctCount}✓{item.partialCount > 0 ? ` ${item.partialCount}◑` : ''} {item.wrongCount}✗ · {item.accuracy}%
+                    </span>
                   </div>
                 </div>
               );
@@ -558,18 +568,31 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
             {reviewQuestions.map((q, idx) => {
               const myAns = selectedAnswers[idx];
               const isShortAnswer = q.questionType === 'short_answer';
+              // Per-question proximity score (0-100) from server — only for short_answer
+              const qScore = myEntry?.answerScores?.[idx] ?? null;
               const isCorrect = !isShortAnswer && myAns === q.correctAnswer;
               const isSkipped = myAns === undefined || myAns === -1 || myAns === '';
+
+              // Short-answer status label based on proximity score
+              const saStatus = isSkipped ? 'SKIPPED'
+                : qScore === 100 ? '✓ CORRECT'
+                : qScore > 0    ? `◑ ${qScore}%`
+                : '✗ WRONG';
+              const saStyle = isSkipped ? 'bg-[#EFE9DC] text-[#66635D]'
+                : qScore === 100 ? 'bg-[#D1FAE5] text-[#065F46]'
+                : qScore > 0    ? 'bg-amber-100 text-amber-800'
+                : 'bg-[#FEE2E2] text-[#991B1B]';
+
               return (
                 <div key={idx} className="bg-[#FFFDF8] p-4 rounded-2xl border border-[#E2DACB] space-y-3">
                   <div className="flex justify-between items-start">
                     <span className="text-xs font-bold text-[#66635D]">Q{idx + 1}</span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      isShortAnswer ? 'bg-[#EFE9DC] text-[#244A73]'
+                      isShortAnswer ? saStyle
                       : isSkipped ? 'bg-[#EFE9DC] text-[#66635D]'
                       : isCorrect ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#FEE2E2] text-[#991B1B]'
                     }`}>
-                      {isShortAnswer ? 'SHORT ANSWER'
+                      {isShortAnswer ? saStatus
                         : isSkipped ? 'SKIPPED'
                         : isCorrect ? '✓ CORRECT' : '✗ WRONG'}
                     </span>
@@ -589,6 +612,18 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, onRoomCode
                       {q.referenceAnswer && (
                         <div className="px-3 py-2 rounded-lg border text-xs bg-[#D1FAE5] border-[#10B981] text-[#065F46]">
                           <strong className="mr-1">Reference Answer:</strong> {q.referenceAnswer}
+                        </div>
+                      )}
+                      {qScore !== null && !isSkipped && (
+                        <div className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 ${
+                          qScore === 100 ? 'bg-green-50 border-green-200 text-green-700'
+                          : qScore > 0   ? 'bg-amber-50 border-amber-200 text-amber-700'
+                          : 'bg-red-50 border-red-200 text-red-700'
+                        }`}>
+                          Score: {qScore}/100
+                          {qScore === 100 && ' — Perfect!'}
+                          {qScore > 0 && qScore < 100 && ' — Partial credit'}
+                          {qScore === 0 && ' — No credit'}
                         </div>
                       )}
                     </div>

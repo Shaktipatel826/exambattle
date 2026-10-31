@@ -1,6 +1,7 @@
 import { Question } from '../models/Question.js';
 import { TestAttempt } from '../models/TestAttempt.js';
 import { awardUserXP } from '../services/gamification.js';
+import { scoreShortAnswer } from '../services/proximityScorer.js';
 
 // In-memory active battle rooms cache
 const activeRooms = new Map();
@@ -539,17 +540,34 @@ async function finishBattle(room, io) {
 
   room.players.forEach(p => {
     let correct = 0;
-    let wrong = 0;
-    let score = 0;
+    let partial = 0;
+    let wrong   = 0;
+    let score   = 0;
+    const answerScores = {}; // { questionIndex: 0-100 } for short-answer questions
 
     room.questions.forEach((q, idx) => {
       const selected = p.answers[idx];
-      // Short-answer questions: no auto-scoring yet (AI evaluation on hold)
-      // Do not penalise or reward — skip scoring entirely
+
+      // ── Short-answer: proximity scoring ─────────────────────────────────
       if (q.questionType === 'short_answer') {
+        const hasAnswer = selected !== undefined && selected !== null &&
+                          selected !== '' && selected !== -1;
+        if (!hasAnswer) {
+          answerScores[idx] = 0;
+          return; // unattempted — no penalty, no reward
+        }
+        const { score: pct } = scoreShortAnswer(String(selected), q.referenceAnswer || '');
+        answerScores[idx] = pct;
+
+        // Contribution: pct/100 points (max 1, same weight as MCQ correct)
+        score += pct / 100;
+        if (pct === 100)      correct++;
+        else if (pct > 0)     partial++;
+        else                  wrong++;
         return;
       }
-      // MCQ scoring
+
+      // ── MCQ: existing exact scoring ──────────────────────────────────────
       if (selected !== undefined && selected !== -1) {
         if (selected === q.correctAnswer) {
           correct++;
@@ -561,12 +579,17 @@ async function finishBattle(room, io) {
       }
     });
 
-    const unattempted = room.questions.length - (correct + wrong);
-    p.correctCount = correct;
-    p.wrongCount = wrong;
+    const attempted = correct + partial + wrong;
+    const unattempted = room.questions.length - attempted;
+    p.correctCount    = correct;
+    p.partialCount    = partial;
+    p.wrongCount      = wrong;
     p.unattemptedCount = unattempted;
-    p.score = Math.max(0, parseFloat(score.toFixed(2)));
-    p.accuracy = room.questions.length > 0 ? Math.round((correct / room.questions.length) * 100) : 0;
+    p.score           = Math.max(0, parseFloat(score.toFixed(2)));
+    p.accuracy        = room.questions.length > 0
+      ? Math.round(Math.max(0, score) / room.questions.length * 100)
+      : 0;
+    p.answerScores    = answerScores;
   });
 
   room.players.sort((a, b) => b.score - a.score);
@@ -590,7 +613,7 @@ async function finishBattle(room, io) {
       });
 
       const bonusXp = i === 0 ? 50 : 20;
-      await awardUserXP(p.userId, (p.correctCount * 10) + bonusXp);
+      await awardUserXP(p.userId, (p.correctCount * 10) + Math.round((p.partialCount || 0) * 5) + bonusXp);
     } catch (e) {
       console.error('[Battle Result Save Error]', e.message);
     }
@@ -604,10 +627,12 @@ async function finishBattle(room, io) {
       score: p.score,
       accuracy: p.accuracy,
       correctCount: p.correctCount,
+      partialCount: p.partialCount || 0,
       wrongCount: p.wrongCount,
-      unattemptedCount: p.unattemptedCount
+      unattemptedCount: p.unattemptedCount,
+      answerScores: p.answerScores || {},
     })),
-    questions: room.questions
+    questions: room.questions   // includes referenceAnswer — revealed only after finish
   });
 }
 
