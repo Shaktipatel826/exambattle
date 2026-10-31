@@ -58,16 +58,32 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
       console.error('[Socket] Connect error:', err.message);
     });
 
+    newSocket.on('connect', () => {
+      console.log(`[Battle] Socket connected: id=${newSocket.id}`);
+    });
+
     newSocket.on('room_updated', (updatedRoom) => {
+      console.log(`[Battle] room_updated received: status=${updatedRoom?.status}, players=${updatedRoom?.players?.length}`);
       setRoomState(updatedRoom);
     });
 
     newSocket.on('battle_started', ({ startTime, endTime, questions }) => {
-      setRoomState(prev =>
-        prev ? { ...prev, status: 'IN_PROGRESS', questions, startTime, endTime } : prev
-      );
-      setCurrentQIndex(0);
-      setSelectedAnswers({});
+      console.log('[Battle] battle_started received by client — navigating to question screen');
+      setRoomState(prev => {
+        const alreadyInProgress = prev?.status === 'IN_PROGRESS';
+        // On a reconnect-sync the server re-sends battle_started to restore the
+        // question list. Preserve the player's current question index and answers
+        // so they don't lose progress mid-battle.
+        if (alreadyInProgress) {
+          console.log('[Battle] battle_started: reconnect-sync — preserving player progress');
+          return { ...prev, questions, startTime, endTime };
+        }
+        // Fresh start: reset index and answers
+        setCurrentQIndex(0);
+        setSelectedAnswers({});
+        return prev ? { ...prev, status: 'IN_PROGRESS', questions, startTime, endTime } : prev;
+      });
+      // Always sync the countdown timer (catches drift on reconnect too)
       const remainingSecs = Math.floor((endTime - Date.now()) / 1000);
       setTimeLeft(Math.max(0, remainingSecs));
     });
@@ -75,9 +91,20 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
     newSocket.on('reconnect', () => {
       console.log('[Battle] Socket reconnected — re-joining room');
       setRoomState(prev => {
-        if (prev?.roomCode && prev.status === 'LOBBY') {
+        if (!prev?.roomCode) return prev;
+        // Re-join on LOBBY *and* IN_PROGRESS so the server can:
+        //   - re-add us to the Socket.IO room (so we receive future broadcasts)
+        //   - emit battle_started back to just our socket (IN_PROGRESS sync)
+        if (prev.status === 'LOBBY' || prev.status === 'IN_PROGRESS') {
+          console.log(`[Battle] Reconnect: re-joining room ${prev.roomCode} (status=${prev.status})`);
           newSocket.emit('join_room', { roomCode: prev.roomCode, user }, (response) => {
-            if (response?.success) setRoomState(response.room);
+            if (response?.success) {
+              // For IN_PROGRESS rooms the server will emit battle_started separately
+              // to restore questions. Only overwrite roomState for LOBBY re-joins.
+              if (response.room?.status === 'LOBBY') {
+                setRoomState(response.room);
+              }
+            }
           });
         }
         return prev;

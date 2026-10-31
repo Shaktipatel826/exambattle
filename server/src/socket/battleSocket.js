@@ -270,7 +270,10 @@ export const initializeBattleSocket = (io) => {
       if (!roomCode) return;
       const cleanCode = roomCode.trim().toUpperCase();
       const room = activeRooms.get(cleanCode);
+      console.log(`[Battle] join_room: code=${cleanCode}, userId=${user?.id || user?._id}, socketId=${socket.id}, roomStatus=${room?.status}`);
+
       if (!room) {
+        console.warn(`[Battle] join_room failed: room ${cleanCode} not found`);
         if (typeof callback === 'function') callback({ success: false, message: 'Battle Room not found. Check room code.' });
         return;
       }
@@ -280,8 +283,10 @@ export const initializeBattleSocket = (io) => {
         return;
       }
 
-      let existingPlayer = room.players.find(p => p.userId === (user.id || user._id));
+      const userId = user?.id || user?._id;
+      let existingPlayer = room.players.find(p => p.userId === userId);
       if (existingPlayer) {
+        console.log(`[Battle] join_room: reconnecting existing player ${userId}, updating socketId ${existingPlayer.socketId} → ${socket.id}`);
         existingPlayer.socketId = socket.id;
       } else {
         // ENFORCE MAX CAPACITY: 3 PLAYERS MAXIMUM
@@ -289,8 +294,9 @@ export const initializeBattleSocket = (io) => {
           if (typeof callback === 'function') callback({ success: false, message: 'Room is full (Max 3 players).' });
           return;
         }
+        console.log(`[Battle] join_room: new player ${userId} joining room ${cleanCode}`);
         room.players.push({
-          userId: user.id || user._id,
+          userId,
           name: user.name,
           socketId: socket.id,
           isReady: false, // Non-host starts unready
@@ -305,6 +311,29 @@ export const initializeBattleSocket = (io) => {
 
       socket.join(room.roomCode);
       io.to(room.roomCode).emit('room_updated', sanitizeRoomState(room));
+
+      // ── CRITICAL: If the room is already IN_PROGRESS, sync this socket immediately ──
+      // This handles reconnects and late-joins during an active battle.
+      // We emit battle_started only to this socket (not the whole room) so other
+      // players are not disrupted. The client's handler will restore the question screen.
+      if (room.status === 'IN_PROGRESS') {
+        console.log(`[Battle] join_room: room ${cleanCode} is IN_PROGRESS — syncing socket ${socket.id} with battle_started`);
+        socket.emit('battle_started', {
+          status: 'IN_PROGRESS',
+          startTime: room.startTime,
+          endTime: room.endTime,
+          questions: room.questions.map(q => ({
+            _id: q._id,
+            question: q.question,
+            options: q.options,
+            questionType: q.questionType || 'mcq',
+            subject: q.subject,
+            topic: q.topic,
+            difficulty: q.difficulty
+            // correctAnswer, referenceAnswer, explanation intentionally stripped
+          }))
+        });
+      }
 
       if (typeof callback === 'function') {
         callback({ success: true, room: sanitizeRoomState(room) });
@@ -391,7 +420,7 @@ export const initializeBattleSocket = (io) => {
       room.startTime = Date.now();
       room.endTime = room.startTime + durationMs;
 
-      console.log(`[Battle] Starting battle in room ${cleanCode}: ${room.questions.length} questions, ${room.config.timeLimitMinutes} min`);
+      console.log(`[Battle] Room status changed to ACTIVE (IN_PROGRESS): room=${cleanCode}, players=${room.players.length}, questions=${room.questions.length}, timeLimitMinutes=${room.config.timeLimitMinutes}`);
 
       // Auto-finish when timer expires (server-side safety net)
       room._timerTimeout = setTimeout(async () => {
@@ -403,7 +432,7 @@ export const initializeBattleSocket = (io) => {
       }, durationMs + 5000); // 5s grace period after timer
 
       // SECURITY: Strip correct answers and explanations before starting live battle
-      io.to(cleanCode).emit('battle_started', {
+      const battlePayload = {
         status: 'IN_PROGRESS',
         startTime: room.startTime,
         endTime: room.endTime,
@@ -417,7 +446,14 @@ export const initializeBattleSocket = (io) => {
           difficulty: q.difficulty
           // correctAnswer, referenceAnswer, explanation intentionally stripped
         }))
+      };
+
+      console.log(`[Battle] battle_started broadcast to room ${cleanCode}: ${room.players.length} players`);
+      room.players.forEach(p => {
+        console.log(`[Battle]   → player ${p.name} (userId=${p.userId}, socketId=${p.socketId})`);
       });
+
+      io.to(cleanCode).emit('battle_started', battlePayload);
 
       if (typeof callback === 'function') callback({ success: true });
     });
