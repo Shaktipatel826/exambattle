@@ -1,14 +1,17 @@
 /**
- * CreateTestPage — Primary Create Test Interface
+ * CreateTestPage — Create Test with two modes:
+ *   1. "AI Generate" — Upload file / paste material → 3-AI pipeline generates MCQs
+ *   2. "Paste Q&A"  — Copy prompt → use external AI (ChatGPT/Gemini/Claude) →
+ *                     paste formatted Q&A back → preview & save
  *
- * Flow: Material Input → Settings → Generate → Preview & Edit → Save / Create Room / Discard
  * State always resets on mount. Never shows previous unsaved questions.
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   UploadCloud, FileText, X, Loader2, CheckCircle2, XCircle,
   AlertCircle, Eye, Save, Swords, Trash2, Edit3, ChevronDown,
-  ChevronUp, Info, Cpu, Zap, Settings2, PlusCircle, RefreshCw
+  ChevronUp, Info, Cpu, Zap, Settings2, RefreshCw, Copy,
+  ClipboardPaste, Sparkles, Bot
 } from 'lucide-react';
 
 const SUBJECTS = [
@@ -34,6 +37,32 @@ const PIPELINE_STEPS = [
   { id: 7, label: 'Preparing test preview' },
 ];
 
+/** The reusable prompt students copy into ChatGPT / Gemini / Claude */
+const EXTERNAL_AI_PROMPT = `You are helping me prepare for Indian competitive exams (SSC CGL, Railway NTPC, UP Police, UPSC, Banking).
+
+Study the material I will provide. Generate multiple-choice questions (MCQs) from it.
+
+FORMAT RULES — follow exactly:
+Q1. [Question text]
+A) [Option A]
+B) [Option B]
+C) [Option C]
+D) [Option D]
+Correct: [A/B/C/D]
+Explanation: [Brief 1-2 sentence explanation]
+
+Q2. [Next question]
+...
+
+Rules:
+- Every question must have exactly 4 options (A, B, C, D).
+- Every question must have exactly one "Correct:" line with a single letter.
+- Do NOT number the options beyond A/B/C/D.
+- Do NOT add any text before Q1 or after the last question.
+- Questions can be in Hindi, English, or a mix — match the source language.
+- Do NOT invent facts. Only use information from the provided material.
+- Generate as many good questions as the material supports.`;
+
 function VerdictBadge({ verdict }) {
   if (verdict === 'PASS') return (
     <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded-full">
@@ -53,37 +82,45 @@ function VerdictBadge({ verdict }) {
 }
 
 export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
-  // ─── Material State ───────────────────────────────────────────────────────
-  const [file, setFile] = useState(null);
-  const [pastedText, setPastedText] = useState('');
-  const [extractedInfo, setExtractedInfo] = useState(null);
-  const fileRef = useRef();
+  // ─── Mode ─────────────────────────────────────────────────────────────────
+  const [activeMode, setActiveMode] = useState('paste'); // 'paste' | 'ai'
 
-  // ─── Settings State ───────────────────────────────────────────────────────
+  // ─── Shared Settings State ────────────────────────────────────────────────
   const [subject, setSubject] = useState('General Studies');
   const [topic, setTopic] = useState('');
   const [language, setLanguage] = useState('en');
   const [difficulty, setDifficulty] = useState('Mixed');
+
+  // ─── AI Pipeline State ────────────────────────────────────────────────────
+  const [file, setFile] = useState(null);
+  const [pastedMaterial, setPastedMaterial] = useState('');
+  const [extractedInfo, setExtractedInfo] = useState(null);
   const [mode, setMode] = useState('quick');
   const [questionCount, setQuestionCount] = useState(15);
   const [skipGroq, setSkipGroq] = useState(false);
   const [skipVerification, setSkipVerification] = useState(false);
-
-  // ─── Pipeline State ───────────────────────────────────────────────────────
   const [processing, setProcessing] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
-  const [questions, setQuestions] = useState([]);
   const [stats, setStats] = useState(null);
   const [metadata, setMetadata] = useState(null);
-  const [error, setError] = useState('');
+  const [providerStatus, setProviderStatus] = useState(null);
   const stepTimerRef = useRef(null);
+  const fileRef = useRef();
 
-  // ─── Preview State ────────────────────────────────────────────────────────
+  // ─── Paste Q&A State ──────────────────────────────────────────────────────
+  const [testTitle, setTestTitle] = useState('');
+  const [qaText, setQaText] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [parseErrors, setParseErrors] = useState([]);
+  const [parseStats, setParseStats] = useState(null);
+  const [promptCopied, setPromptCopied] = useState(false);
+
+  // ─── Shared Preview/Save/Room State ───────────────────────────────────────
+  const [questions, setQuestions] = useState([]);
+  const [error, setError] = useState('');
   const [expandedQ, setExpandedQ] = useState(null);
   const [editingQ, setEditingQ] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-
-  // ─── Save / Room State ────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
   const [savedTestId, setSavedTestId] = useState(null);
   const [saveError, setSaveError] = useState('');
@@ -91,12 +128,12 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
   const [roomCode, setRoomCode] = useState(null);
   const [roomError, setRoomError] = useState('');
   const [discardConfirm, setDiscardConfirm] = useState(false);
-  const [providerStatus, setProviderStatus] = useState(null);
 
-  // ─── CRITICAL: Reset all state on every mount (no stale draft) ────────────
+  // ─── Full reset on mount ──────────────────────────────────────────────────
   useEffect(() => {
+    setActiveMode('paste');
     setFile(null);
-    setPastedText('');
+    setPastedMaterial('');
     setExtractedInfo(null);
     setProcessing(false);
     setCurrentStep(0);
@@ -104,6 +141,10 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     setStats(null);
     setMetadata(null);
     setError('');
+    setParseErrors([]);
+    setParseStats(null);
+    setQaText('');
+    setTestTitle('');
     setExpandedQ(null);
     setEditingQ(null);
     setEditDraft(null);
@@ -116,17 +157,91 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     setDiscardConfirm(false);
     if (stepTimerRef.current) clearInterval(stepTimerRef.current);
 
-    // Load provider status
+    // Load AI provider status (for the AI pipeline tab)
     fetch('/api/ai/doc-to-test/status', {
       headers: { Authorization: `Bearer ${token}` }
     }).then(r => r.json()).then(d => {
       if (d.success) setProviderStatus(d.providers);
     }).catch(() => {});
-  }, []); // empty array = only on mount
+  }, []); // only on mount
+
+  // ─── Mode switch: clear preview ───────────────────────────────────────────
+  const switchMode = (newMode) => {
+    if (questions.length > 0) {
+      if (!window.confirm('Switch mode? Your current preview will be cleared.')) return;
+    }
+    setActiveMode(newMode);
+    setQuestions([]);
+    setError('');
+    setParseErrors([]);
+    setParseStats(null);
+    setSavedTestId(null);
+    setRoomCode(null);
+  };
 
   const getWordCount = (text) => text.trim().split(/\s+/).filter(Boolean).length;
 
-  // ─── File Handling ────────────────────────────────────────────────────────
+  // ─── Copy Prompt ──────────────────────────────────────────────────────────
+  const copyPrompt = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(EXTERNAL_AI_PROMPT);
+      setPromptCopied(true);
+      setTimeout(() => setPromptCopied(false), 2500);
+    } catch {
+      // Fallback for browsers that block clipboard
+      const ta = document.createElement('textarea');
+      ta.value = EXTERNAL_AI_PROMPT;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setPromptCopied(true);
+      setTimeout(() => setPromptCopied(false), 2500);
+    }
+  }, []);
+
+  // ─── Parse Q&A Text ───────────────────────────────────────────────────────
+  const handleParseText = async () => {
+    if (!qaText.trim()) {
+      setError('Please paste the Q&A text generated by your AI tool.');
+      return;
+    }
+    setError('');
+    setParseErrors([]);
+    setParseStats(null);
+    setQuestions([]);
+    setSavedTestId(null);
+    setRoomCode(null);
+    setParsing(true);
+
+    try {
+      const res = await fetch('/api/saved-tests/parse-text', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ rawText: qaText })
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        setError(data.message || 'Could not parse the text. Check format and try again.');
+        setParseErrors(data.errors || []);
+        setParseStats(data.stats || null);
+      } else {
+        setQuestions(data.questions || []);
+        setParseErrors(data.errors || []);
+        setParseStats(data.stats || null);
+      }
+    } catch (err) {
+      setError(`Network error: ${err.message}`);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  // ─── File Handling (AI mode) ──────────────────────────────────────────────
   const handleFileChange = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -158,10 +273,10 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  // ─── Generate ─────────────────────────────────────────────────────────────
+  // ─── AI Generate ─────────────────────────────────────────────────────────
   const handleGenerate = async (e) => {
     e.preventDefault();
-    if (!file && !pastedText.trim()) {
+    if (!file && !pastedMaterial.trim()) {
       setError('Please upload a file or paste study material text.');
       return;
     }
@@ -180,7 +295,6 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     setProcessing(true);
     setCurrentStep(1);
 
-    // Animate through steps while pipeline runs server-side
     let step = 1;
     stepTimerRef.current = setInterval(() => {
       step++;
@@ -190,7 +304,7 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
 
     const formData = new FormData();
     if (file) formData.append('file', file);
-    if (pastedText.trim()) formData.append('pastedText', pastedText.trim());
+    if (pastedMaterial.trim()) formData.append('pastedText', pastedMaterial.trim());
     formData.append('subject', subject);
     formData.append('topic', topic || subject);
     formData.append('exam', 'General');
@@ -201,7 +315,6 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     formData.append('skipGroq', String(skipGroq));
     formData.append('skipVerification', String(skipVerification));
 
-    // AbortController — give up after 115 s so the UI never hangs forever
     const controller = new AbortController();
     const fetchTimeoutId = setTimeout(() => controller.abort(), 115000);
 
@@ -240,8 +353,7 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
       clearInterval(stepTimerRef.current);
       if (err.name === 'AbortError') {
         setError(
-          'Request timed out (>115 s). The pipeline is taking too long. ' +
-          'Try enabling "Skip Verification", using shorter material, or requesting fewer questions.'
+          'Request timed out (>115 s). Try enabling "Skip Verification", using shorter material, or requesting fewer questions.'
         );
       } else {
         setError(`Network error: ${err.message}`);
@@ -282,6 +394,8 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     if (questions.length === 0) return;
     setSaving(true);
     setSaveError('');
+    const autoTitle = testTitle.trim() ||
+      `${subject} Test — ${new Date().toLocaleDateString('en-IN')}`;
     try {
       const res = await fetch('/api/saved-tests', {
         method: 'POST',
@@ -290,14 +404,15 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          title: autoTitle,
           subject,
           topic: topic || subject,
           difficulty,
           language,
-          mode,
+          mode: activeMode === 'paste' ? 'quick' : mode,
           questions,
-          stats,
-          sourceDocumentName: file?.name || 'Pasted Content',
+          stats: stats || {},
+          sourceDocumentName: activeMode === 'paste' ? 'Student Q&A (External AI)' : (file?.name || 'Pasted Content'),
           extractedChars: metadata?.extractedChars || 0
         })
       });
@@ -328,12 +443,7 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     socket.emit('create_room_with_questions', {
       user: { id: user?.id || user?._id, name: user?.name },
       questions,
-      config: {
-        subject,
-        topic: topic || subject,
-        difficulty,
-        timeLimitMinutes: Math.max(5, Math.ceil(questions.length * 1.5))
-      }
+      config: { subject, topic, difficulty, timeLimitMinutes: Math.max(5, Math.ceil(questions.length * 1.5)) }
     }, (ack) => {
       setCreatingRoom(false);
       if (ack?.success) {
@@ -356,13 +466,17 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
     setStats(null);
     setMetadata(null);
     setFile(null);
-    setPastedText('');
+    setPastedMaterial('');
+    setQaText('');
+    setTestTitle('');
     setExtractedInfo(null);
     setSavedTestId(null);
     setRoomCode(null);
     setError('');
     setSaveError('');
     setRoomError('');
+    setParseErrors([]);
+    setParseStats(null);
     setDiscardConfirm(false);
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -395,33 +509,206 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
 
       {/* Page Header */}
       <div className="bg-gradient-to-r from-[#1a3a5c] to-[#244A73] rounded-2xl p-5 text-white">
-        <div className="flex items-center gap-3 mb-2">
+        <div className="flex items-center gap-3 mb-3">
           <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
             <Cpu className="w-6 h-6" />
           </div>
           <div>
             <h1 className="text-lg font-black">Create Test</h1>
-            <p className="text-xs text-white/70">
-              Upload study material → Generate MCQs with 3 AI providers → Preview, Edit, Save &amp; Battle
-            </p>
+            <p className="text-xs text-white/70">Build your own MCQ test and battle friends</p>
           </div>
         </div>
-        {providerStatus && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {Object.entries(providerStatus).map(([name, info]) => (
-              <span key={name}
-                className="flex items-center gap-1.5 bg-white/10 text-[11px] font-semibold px-2.5 py-1 rounded-full">
-                <span className={`w-1.5 h-1.5 rounded-full ${info.configured ? 'bg-green-400' : 'bg-red-400'}`} />
-                <span className="capitalize">{name}</span>
-                <span className="text-white/50 hidden sm:inline">— {info.role}</span>
-              </span>
-            ))}
-          </div>
-        )}
+
+        {/* Mode Switcher */}
+        <div className="flex gap-2 mt-1">
+          <button
+            type="button"
+            onClick={() => switchMode('paste')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeMode === 'paste'
+                ? 'bg-white text-[#244A73] shadow'
+                : 'bg-white/10 text-white/80 hover:bg-white/20'
+            }`}
+          >
+            <ClipboardPaste className="w-3.5 h-3.5" />
+            ✍️ Paste Q&amp;A
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode('ai')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeMode === 'ai'
+                ? 'bg-white text-[#244A73] shadow'
+                : 'bg-white/10 text-white/80 hover:bg-white/20'
+            }`}
+          >
+            <Bot className="w-3.5 h-3.5" />
+            🤖 AI Generate
+          </button>
+        </div>
       </div>
 
-      {/* Input + Settings (only when not processing and no questions yet) */}
-      {!processing && questions.length === 0 && (
+      {/* ═══════════════════════════════════════════════════════════════════
+          PASTE Q&A MODE
+      ═══════════════════════════════════════════════════════════════════ */}
+      {activeMode === 'paste' && !processing && questions.length === 0 && (
+        <div className="space-y-5">
+
+          {/* Step 1: Test Details */}
+          <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-4">
+            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-[#244A73]" />
+              Test Details
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="sm:col-span-2">
+                <label className="block text-[#66635D] mb-1 font-semibold">Test Title (optional)</label>
+                <input
+                  type="text"
+                  placeholder={`${subject} Test — ${new Date().toLocaleDateString('en-IN')}`}
+                  value={testTitle}
+                  onChange={e => setTestTitle(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] focus:outline-none focus:border-[#244A73]"
+                />
+              </div>
+              <div>
+                <label className="block text-[#66635D] mb-1 font-semibold">Subject</label>
+                <select value={subject} onChange={e => setSubject(e.target.value)}
+                  className="w-full px-2 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]">
+                  {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[#66635D] mb-1 font-semibold">Difficulty</label>
+                <select value={difficulty} onChange={e => setDifficulty(e.target.value)}
+                  className="w-full px-2 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]">
+                  {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[#66635D] mb-1 font-semibold">Topic (optional)</label>
+                <input type="text" placeholder="e.g. Fundamental Rights"
+                  value={topic} onChange={e => setTopic(e.target.value)}
+                  className="w-full px-2 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] focus:outline-none focus:border-[#244A73]" />
+              </div>
+              <div>
+                <label className="block text-[#66635D] mb-1 font-semibold">Language</label>
+                <select value={language} onChange={e => setLanguage(e.target.value)}
+                  className="w-full px-2 py-2 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] font-semibold focus:outline-none focus:border-[#244A73]">
+                  {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 2: Prompt Box */}
+          <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-3">
+            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#244A73]" />
+              Generate Questions Using Any AI
+            </h2>
+            <ol className="text-xs text-[#66635D] space-y-1 list-none pl-0">
+              {[
+                'Copy the prompt below.',
+                'Open ChatGPT, Gemini, Claude or any other AI tool.',
+                'Upload your PDF, textbook images, notes or study material.',
+                'Paste the prompt and ask the AI to generate questions.',
+                'Copy the AI\'s output and paste it into the box below.',
+              ].map((step, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="shrink-0 w-5 h-5 rounded-full bg-[#244A73]/10 text-[#244A73] text-[10px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+
+            {/* Copyable prompt */}
+            <div className="relative">
+              <pre className="text-[10px] leading-relaxed text-[#252525] bg-[#F7F3EA] border border-[#D5CDBF] rounded-xl p-3 overflow-auto max-h-48 whitespace-pre-wrap font-mono">
+                {EXTERNAL_AI_PROMPT}
+              </pre>
+              <button
+                type="button"
+                onClick={copyPrompt}
+                className={`absolute top-2 right-2 flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-all ${
+                  promptCopied
+                    ? 'bg-green-100 text-green-700 border border-green-200'
+                    : 'bg-[#244A73] text-white hover:bg-[#1a3a5c]'
+                }`}
+              >
+                {promptCopied ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {promptCopied ? 'Copied!' : 'Copy Prompt'}
+              </button>
+            </div>
+          </div>
+
+          {/* Step 3: Paste Q&A */}
+          <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-3">
+            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+              <ClipboardPaste className="w-4 h-4 text-[#244A73]" />
+              Paste AI-Generated Q&amp;A
+            </h2>
+            <p className="text-xs text-[#66635D]">
+              Paste the AI output here. Each question must follow this format:
+            </p>
+            <div className="bg-[#F7F3EA] border border-[#D5CDBF] rounded-xl p-3 text-[10px] font-mono text-[#252525] leading-relaxed whitespace-pre">
+{`Q1. What is the capital of India?
+A) Mumbai
+B) New Delhi
+C) Kolkata
+D) Chennai
+Correct: B
+Explanation: New Delhi has been the capital since 1911.`}
+            </div>
+            <textarea
+              rows={12}
+              placeholder="Paste the complete Q&A output from ChatGPT / Gemini / Claude here…"
+              value={qaText}
+              onChange={e => setQaText(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-xs resize-y focus:outline-none focus:border-[#244A73] transition-colors font-mono"
+              dir="auto"
+            />
+            {qaText.trim() && (
+              <p className="text-[10px] text-[#66635D]">
+                {qaText.trim().length.toLocaleString()} chars pasted
+              </p>
+            )}
+
+            {error && (
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {parseErrors.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] font-bold text-amber-700">Parse errors ({parseErrors.length}):</p>
+                {parseErrors.map((e, i) => (
+                  <div key={i} className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                    <strong>{e.ref}:</strong> {e.issue}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleParseText}
+              disabled={parsing || !qaText.trim()}
+              className="w-full flex items-center justify-center gap-2 bg-[#244A73] text-white font-bold py-3 rounded-xl hover:bg-[#1a3a5c] transition-colors shadow-sm disabled:opacity-50"
+            >
+              {parsing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+              {parsing ? 'Parsing…' : 'Preview Questions →'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          AI GENERATE MODE — Input Form
+      ═══════════════════════════════════════════════════════════════════ */}
+      {activeMode === 'ai' && !processing && questions.length === 0 && (
         <form onSubmit={handleGenerate} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           {/* A. Material Input */}
@@ -446,8 +733,7 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
                   <div className="flex items-center justify-center gap-2 text-[#244A73]">
                     <FileText className="w-5 h-5" />
                     <span className="text-sm font-semibold truncate max-w-[180px]">{file.name}</span>
-                    <button type="button" onClick={removeFile}
-                      className="text-red-400 hover:text-red-600">
+                    <button type="button" onClick={removeFile} className="text-red-400 hover:text-red-600">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -470,13 +756,13 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
             <textarea
               rows={6}
               placeholder="Paste lecture notes, chapter text, or any study material here..."
-              value={pastedText}
-              onChange={e => setPastedText(e.target.value)}
+              value={pastedMaterial}
+              onChange={e => setPastedMaterial(e.target.value)}
               className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-xs resize-none focus:outline-none focus:border-[#244A73] transition-colors"
             />
-            {pastedText.trim() && (
+            {pastedMaterial.trim() && (
               <p className="text-[10px] text-[#66635D]">
-                {pastedText.trim().length.toLocaleString()} chars • ~{getWordCount(pastedText)} words
+                {pastedMaterial.trim().length.toLocaleString()} chars • ~{getWordCount(pastedMaterial)} words
               </p>
             )}
           </div>
@@ -535,7 +821,7 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
 
             {mode === 'comprehensive' && (
               <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                <strong>Comprehensive mode:</strong> Processes every section of the material. May generate more questions than the target. Takes longer for large documents.
+                <strong>Comprehensive mode:</strong> Processes every section. May generate more questions than the target. Takes longer for large documents.
               </div>
             )}
 
@@ -550,6 +836,18 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
                 <span className="text-[#66635D]">Skip OpenRouter verification</span>
               </label>
             </div>
+
+            {providerStatus && (
+              <div className="flex flex-wrap gap-1.5 pt-1 border-t border-[#E2DACB]">
+                {Object.entries(providerStatus).map(([name, info]) => (
+                  <span key={name}
+                    className="flex items-center gap-1 bg-[#F7F3EA] border border-[#E2DACB] text-[10px] font-semibold px-2 py-1 rounded-full">
+                    <span className={`w-1.5 h-1.5 rounded-full ${info.configured ? 'bg-green-400' : 'bg-red-400'}`} />
+                    <span className="capitalize">{name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
 
             {error && (
               <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
@@ -567,7 +865,9 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
         </form>
       )}
 
-      {/* Processing Progress */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          AI PIPELINE PROCESSING PROGRESS
+      ═══════════════════════════════════════════════════════════════════ */}
       {processing && (
         <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-6 shadow-sm space-y-5">
           <h3 className="text-sm font-bold text-[#252525] flex items-center gap-2">
@@ -601,7 +901,9 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
         </div>
       )}
 
-      {/* Question Preview */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          QUESTION PREVIEW (shared between both modes)
+      ═══════════════════════════════════════════════════════════════════ */}
       {questions.length > 0 && (
         <div className="space-y-4">
 
@@ -617,15 +919,28 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
                   <CheckCircle2 className="w-3 h-3" /> Saved
                 </span>
               )}
+              {parseStats && (
+                <span className="text-[10px] text-[#66635D] bg-[#F7F3EA] border border-[#E2DACB] px-2 py-0.5 rounded-full">
+                  {parseStats.errored > 0 && `${parseStats.errored} skipped`}
+                </span>
+              )}
             </div>
             <button type="button"
-              onClick={() => { setQuestions([]); setStats(null); setMetadata(null); setSavedTestId(null); setRoomCode(null); }}
+              onClick={() => {
+                setQuestions([]);
+                setStats(null);
+                setMetadata(null);
+                setSavedTestId(null);
+                setRoomCode(null);
+                setParseStats(null);
+                setParseErrors([]);
+              }}
               className="text-xs text-[#66635D] border border-[#E2DACB] px-3 py-1.5 rounded-lg hover:bg-[#F7F3EA] flex items-center gap-1 transition-colors">
               <RefreshCw className="w-3.5 h-3.5" /> New Test
             </button>
           </div>
 
-          {/* Pipeline stats bar */}
+          {/* Pipeline stats (AI mode only) */}
           {stats && (
             <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-xl p-3 grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
               {[
@@ -639,6 +954,20 @@ export const CreateTestPage = ({ token, user, onNavigate, socket }) => {
                 <div key={s.label}>
                   <p className={`text-sm font-bold ${s.color}`}>{s.value ?? 0}</p>
                   <p className="text-[10px] text-[#66635D]">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Parse errors (Paste Q&A mode) */}
+          {parseErrors.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold text-amber-700">
+                {parseErrors.length} question{parseErrors.length !== 1 ? 's' : ''} skipped due to format errors:
+              </p>
+              {parseErrors.map((e, i) => (
+                <div key={i} className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                  <strong>{e.ref}:</strong> {e.issue}
                 </div>
               ))}
             </div>
