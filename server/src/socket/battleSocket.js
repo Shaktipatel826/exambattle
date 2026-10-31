@@ -746,48 +746,10 @@ async function finishBattle(room, io) {
     console.log(`[Battle]   #${i+1} ${p.name}: score=${p.score}, correct=${p.correctCount}, partial=${p.partialCount||0}, wrong=${p.wrongCount}, skipped=${p.unattemptedCount}`);
   });
 
-  // ── DB saves — wrapped with individual timeouts so a hung DB call never ─────
-  // blocks the battle_finished broadcast. Scoring is already done; saving is best-effort.
-  const withTimeout = (promise, ms, label) => Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    )
-  ]);
-
-  for (let i = 0; i < room.players.length; i++) {
-    const p = room.players[i];
-    try {
-      await withTimeout(
-        TestAttempt.create({
-          userId: p.userId,
-          userName: p.name,
-          testType: 'BATTLE',
-          subject: room.config.subject,
-          topic: room.config.topic,
-          totalQuestions: room.questions.length,
-          correctCount: p.correctCount,
-          wrongCount: p.wrongCount,
-          unattemptedCount: p.unattemptedCount,
-          score: p.score,
-          accuracy: p.accuracy,
-          timeTakenSeconds: room.config.timeLimitMinutes * 60
-        }),
-        8000,
-        'TestAttempt.create'
-      );
-
-      const bonusXp = i === 0 ? 50 : 20;
-      await withTimeout(
-        awardUserXP(p.userId, (p.correctCount * 10) + Math.round((p.partialCount || 0) * 5) + bonusXp),
-        8000,
-        'awardUserXP'
-      );
-    } catch (e) {
-      console.error(`[Battle Result Save Error] player=${p.name} (${p.userId}): ${e.message}`);
-      // Non-fatal: scoring is already calculated — continue to broadcast results
-    }
-  }
+  // ── BROADCAST RESULTS FIRST ──────────────────────────────────────────
+  // CRITICAL FIX: The battle_finished broadcast must happen IMMEDIATELY after
+  // scoring. DB saves (TestAttempt.create, awardUserXP) are best-effort and run
+  // in the background AFTER the broadcast. A hung DB call must NEVER block results.
 
   const leaderboard = room.players.map((p, rank) => ({
     rank: rank + 1,
@@ -809,13 +771,65 @@ async function finishBattle(room, io) {
     console.log(`[Battle]   → ${p.name} (socketId=${p.socketId})`);
   });
 
+  // Broadcast results to all players immediately
   io.to(room.roomCode).emit('battle_finished', {
     leaderboard,
     questions: room.questions   // includes referenceAnswer — revealed only after finish
   });
 
   console.log(`[Battle] battle_finished broadcast completed for room ${room.roomCode}: ${room.players.map(p => `${p.name}=${p.score}pts`).join(', ')}`);
+
+  // ── Save to DB in the background (non-blocking) ──────────────────────────────────
+  // Results are already broadcast above. DB saves happen after — if they fail or
+  // hang, it does NOT affect the results already delivered to both players.
+  const withTimeout = (promise, ms, label) => Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    )
+  ]);
+
+  // Fire-and-forget: do not await this block
+  (async () => {
+    for (let i = 0; i < room.players.length; i++) {
+      const p = room.players[i];
+      try {
+        await withTimeout(
+          TestAttempt.create({
+            userId: p.userId,
+            userName: p.name,
+            testType: 'BATTLE',
+            subject: room.config.subject,
+            topic: room.config.topic,
+            totalQuestions: room.questions.length,
+            correctCount: p.correctCount,
+            wrongCount: p.wrongCount,
+            unattemptedCount: p.unattemptedCount,
+            score: p.score,
+            accuracy: p.accuracy,
+            timeTakenSeconds: room.config.timeLimitMinutes * 60
+          }),
+          8000,
+          'TestAttempt.create'
+        );
+
+        const bonusXp = i === 0 ? 50 : 20;
+        await withTimeout(
+          awardUserXP(p.userId, (p.correctCount * 10) + Math.round((p.partialCount || 0) * 5) + bonusXp),
+          8000,
+          'awardUserXP'
+        );
+        console.log(`[Battle DB] Saved result for ${p.name} (rank ${i + 1})`);
+      } catch (e) {
+        console.error(`[Battle Result Save Error] player=${p.name} (${p.userId}): ${e.message}`);
+        // Non-fatal: results already broadcast above
+      }
+    }
+    console.log(`[Battle DB] Background save complete for room ${room.roomCode}`);
+  })();
 }
+
+
 
 function getFallbackBattleQuestions(count, subject) {
   return [
