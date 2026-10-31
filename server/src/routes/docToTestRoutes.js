@@ -155,20 +155,44 @@ router.post('/', authMiddleware, upload.single('file'), async (req, res) => {
     });
 
     if (!questions || questions.length === 0) {
-      // Build a detailed diagnostic message from stats
+      // Build an accurate diagnostic from stats
       const diagParts = [];
       if (stats) {
-        if (stats.understandChunksDone === 0 && stats.understandChunksTotal > 0) {
-          diagParts.push('Phase 1 (understanding) failed for all chunks — Gemini could not extract facts from this material.');
-        } else if (stats.factsExtracted === 0) {
-          diagParts.push('No facts were extracted from the material. The content may be too short, be pure audio transcript noise, or in an unsupported format.');
+        const usedFallback = stats.usingFallback === true;
+        const failReason = stats.phase1FallbackReason || '';
+        const lastErrMsg = stats.phase1LastError || '';
+
+        if (failReason === 'RATE_LIMIT') {
+          diagParts.push('Gemini rate limit or quota reached. Wait a few minutes and try again.');
+        } else if (failReason === 'AUTH_ERROR') {
+          diagParts.push('Gemini API key authentication failed. Check that GEMINI_API_KEY is set correctly on the server.');
+        } else if (failReason === 'TIMEOUT') {
+          diagParts.push('Gemini requests timed out. The API may be slow right now — try again in a moment.');
+        } else if (failReason === 'MODEL_NOT_FOUND') {
+          diagParts.push('None of the Gemini model fallbacks responded. Check that your API key supports gemini-1.5-flash.');
+        } else if (usedFallback && stats.geminiGenerated === 0) {
+          // Fallback also ran but got nothing — likely API error in both paths
+          diagParts.push(
+            'Gemini did not generate usable content in either pipeline pass. ' +
+            (lastErrMsg ? `Last error: ${lastErrMsg}` : 'The material may be too short or the AI providers may be temporarily unavailable.')
+          );
+        } else if (!usedFallback && stats.understandChunksDone === 0 && stats.understandChunksTotal > 0) {
+          // Phase 1 ran but parsed 0 facts despite Gemini responding
+          diagParts.push(
+            'Gemini responded but the response did not contain recognisable facts. ' +
+            'This may mean the transcript is mostly filler or the content is very short. ' +
+            (lastErrMsg ? `Detail: ${lastErrMsg}` : '')
+          );
+        } else if (stats.factsExtracted === 0 && stats.generateChunksDone === 0) {
+          diagParts.push('No facts were extracted and no questions were generated. The material may be too noisy or very short.');
         } else if (stats.generateChunksDone === 0) {
-          diagParts.push(`Facts were extracted (${stats.factsExtracted}) but question generation failed. Try enabling "Skip Verification" or using simpler material.`);
+          diagParts.push(`${stats.factsExtracted} facts were extracted but question generation failed. Try enabling "Skip Verification".`);
         } else {
-          diagParts.push(`${stats.geminiGenerated || 0} questions were generated but none passed schema validation.`);
+          diagParts.push(`${stats.geminiGenerated || 0} draft questions were generated but none passed validation (correct answer, 4 options required).`);
         }
       }
-      const hint = 'Tips: (1) Enable "Skip Verification" to speed up the pipeline. (2) Use shorter material. (3) Paste text directly instead of uploading.';
+
+      const hint = 'Tips: (1) Enable "Skip Verification" for faster results. (2) Paste text directly. (3) Try a shorter excerpt first.';
       return res.status(422).json({
         success: false,
         message: `No questions could be generated. ${diagParts.join(' ')} ${hint}`,

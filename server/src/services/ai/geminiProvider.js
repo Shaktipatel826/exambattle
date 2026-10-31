@@ -14,7 +14,13 @@ const getGenAIClient = () => {
 };
 
 /**
- * Execute Gemini model request with exponential backoff & rate-limit handling
+ * Execute Gemini model request with exponential backoff & rate-limit handling.
+ *
+ * Model fallback order:
+ *   1. Configured model (GEMINI_MODEL env var, default gemini-2.0-flash)
+ *   2. gemini-2.0-flash  (fast, widely available)
+ *   3. gemini-1.5-flash  (reliable fallback)
+ *   4. gemini-1.5-flash-8b (smallest / most available on free tier)
  */
 export const executeGeminiPrompt = async (prompt, modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash', timeoutMs = 30000, maxRetries = 2) => {
   const aiClient = getGenAIClient();
@@ -22,7 +28,10 @@ export const executeGeminiPrompt = async (prompt, modelName = process.env.GEMINI
     throw new Error('GEMINI_API_KEY environment variable missing or unconfigured on server.');
   }
 
-  const candidateModels = Array.from(new Set([modelName, 'gemini-2.0-flash', 'gemini-1.5-flash']));
+  // Deduplicate while preserving fallback order
+  const candidateModels = Array.from(
+    new Set([modelName, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'])
+  );
   let lastError = null;
 
   for (const targetModel of candidateModels) {
@@ -41,18 +50,24 @@ export const executeGeminiPrompt = async (prompt, modelName = process.env.GEMINI
         lastError = err;
         const isNotFound = err.message.includes('404') || err.message.includes('not found') || err.message.includes('is no longer available');
         if (isNotFound) {
-          console.warn(`[Gemini Provider Warning] Model ${targetModel} returned unavailable/404. Trying fallback model...`);
-          break;
+          console.warn(`[Gemini] Model "${targetModel}" not found/unavailable. Trying next fallback...`);
+          break; // move to next candidate model
+        }
+        const isAuthError = err.message.includes('401') || err.message.includes('403') || err.message.includes('API_KEY');
+        if (isAuthError) {
+          // Hard stop — all models share the same key
+          throw new Error(`Gemini authentication error (${targetModel}): ${err.message.substring(0, 200)}`);
         }
         const isRateLimit = err.message.includes('429') || err.message.includes('Quota') || err.message.includes('rate limit');
         if (attempt <= maxRetries) {
           const backoffMs = isRateLimit ? attempt * 3000 : attempt * 1000;
-          console.warn(`[Gemini Provider Warning] Model ${targetModel} attempt ${attempt} failed (${err.message}). Retrying in ${backoffMs}ms...`);
+          console.warn(`[Gemini] Model "${targetModel}" attempt ${attempt}/${maxRetries + 1} failed: ${err.message.substring(0, 120)}. Retrying in ${backoffMs}ms...`);
           await new Promise(res => setTimeout(res, backoffMs));
         } else {
           if (isRateLimit) {
             throw new Error('Gemini quota/rate limit reached. Please retry later.');
           }
+          console.warn(`[Gemini] Model "${targetModel}" exhausted all ${maxRetries + 1} attempts. Trying next fallback...`);
         }
       }
     }

@@ -159,15 +159,72 @@ Rules:
 
   try {
     const rawText = await executeGeminiPrompt(prompt, undefined, 30000, 1);
-    // Extract bullet lines
-    const lines = rawText.split('\n')
-      .map(l => l.trim())
-      .filter(l => l.startsWith('•') || l.startsWith('-') || l.startsWith('*'))
-      .map(l => l.replace(/^[•\-*]\s*/, '').trim())
+
+    // ── Robust multi-format fact parsing ─────────────────────────────────────
+    // Gemini may respond with:
+    //   • bullet  — •, -, *, ◦, ▪, ●
+    //   1. numbered lists — 1., 2., (1), (a)
+    //   **Bold header** followed by content
+    //   Plain lines with no marker
+    // We accept ALL non-empty non-header lines.
+
+    const BULLET_RE = /^(?:[•◦▪●]|- |\d+[.)]\s|[（(][0-9a-z][)）]\s?)/u;
+    // Asterisk bullets only if NOT a markdown bold label (**text:**)
+    const ASTERISK_BULLET_RE = /^\* /;
+    const HEADER_RE = /^(?:#{1,3}\s|\*{1,2}[^*]+\*{1,2}:?\s*$|facts?:?\s*$|key\s+points?:?\s*$|तथ्य:?\s*$|मुख्य\s+बिंदु:?\s*$)/iu;
+    const MARKDOWN_RE = /^```|^---+$|^\*{3,}$|^\s*$/;
+
+    const lines = rawText.split('\n').map(l => l.trim());
+
+    // First try: prefer lines with recognised bullet markers
+    let facts = lines
+      .filter(l => l && !HEADER_RE.test(l) && (BULLET_RE.test(l) || ASTERISK_BULLET_RE.test(l)))
+      .map(l => l.replace(/^(?:[•◦▪●] ?|- |\* |\d+[.)]\s+|[（(][0-9a-z][)）]\s*)/, '').trim())
       .filter(l => l.length > 5);
-    return lines;
+
+    // Second try: if Gemini returned no bullet markers at all, fall back to
+    // every non-empty, non-header, non-markdown line (plain paragraph style)
+    if (facts.length === 0) {
+      facts = lines
+        .filter(l => l.length > 10 && !HEADER_RE.test(l) && !MARKDOWN_RE.test(l))
+        .map(l =>
+          // Strip any residual inline markdown (**, __, `)
+          l.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').replace(/`([^`]+)`/g, '$1').trim()
+        )
+        .filter(l => l.length > 5);
+    }
+
+    // Log for diagnosis (safe — no key or PII in rawText preview)
+    if (facts.length === 0) {
+      console.warn(
+        `[Phase1] Chunk ${chunkIndex + 1}: Gemini responded but 0 facts parsed. ` +
+        `Raw preview (first 300 chars): ${rawText.substring(0, 300).replace(/\n/g, '↵')}`
+      );
+    } else {
+      console.log(`[Phase1] Chunk ${chunkIndex + 1}: ${facts.length} facts parsed from Gemini response.`);
+    }
+
+    return facts;
   } catch (err) {
-    console.warn(`[Phase1] Fact extraction chunk ${chunkIndex + 1} failed: ${err.message}`);
+    // Categorise the error for the caller so stats are meaningful
+    const category =
+      err.message.includes('API_KEY') || err.message.includes('401') || err.message.includes('403')
+        ? 'AUTH_ERROR'
+        : err.message.includes('429') || err.message.toLowerCase().includes('quota') || err.message.toLowerCase().includes('rate limit')
+        ? 'RATE_LIMIT'
+        : err.message.includes('timed out') || err.message.includes('timeout')
+        ? 'TIMEOUT'
+        : err.message.includes('404') || err.message.includes('not found') || err.message.includes('fallbacks failed')
+        ? 'MODEL_NOT_FOUND'
+        : 'API_ERROR';
+
+    console.warn(`[Phase1] Chunk ${chunkIndex + 1} failed [${category}]: ${err.message}`);
+    // Attach category so _runPipeline can surface a useful error message
+    const tagged = new Error(err.message);
+    tagged.category = category;
+    // Still return [] — don't throw; the caller handles partial failures
+    // but store last error for reporting
+    extractFactsFromChunk._lastError = tagged;
     return [];
   }
 }
@@ -467,8 +524,24 @@ async function _runPipeline({
   stats.factsExtracted = allFacts.length;
 
   if (allFacts.length === 0) {
-    // Fall back: use raw text directly if fact extraction completely failed
-    console.warn('[Phase1] No facts extracted by Phase 1. Falling back to raw-text generation.');
+    // Determine why Phase 1 produced nothing: API error vs genuinely empty content
+    const lastErr = extractFactsFromChunk._lastError;
+    const failCategory = lastErr?.category || 'UNKNOWN';
+
+    // Mark that the fallback is running (so route diagnostics are accurate)
+    stats.phase1FallbackReason = failCategory;
+    stats.phase1LastError = lastErr?.message?.substring(0, 200) || 'No facts parsed from Gemini response';
+
+    if (failCategory === 'AUTH_ERROR') {
+      // Hard stop — retrying won't help
+      throw new Error(
+        'Gemini authentication failed (401/403). Check that GEMINI_API_KEY is set correctly in the Render environment.'
+      );
+    }
+
+    // Fall back: use raw text directly
+    console.warn(`[Phase1] No facts extracted (reason: ${failCategory}). Falling back to raw-text generation.`);
+    stats.usingFallback = true;
     return _runRawTextPipeline({ extractedText, subject, topic, exam, difficulty, questionCount, language, mode, sourceDocumentName, createdBy, skipGroq, skipVerification, stats });
   }
 
