@@ -116,7 +116,22 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
 
     newSocket.on('room_updated', (updatedRoom) => {
       console.log(`[Battle] room_updated received: status=${updatedRoom?.status}, players=${updatedRoom?.players?.length}`);
-      setRoomState(updatedRoom);
+      // ── MERGE FIX: preserve questions and endTime during IN_PROGRESS ──
+      // sanitizeRoomState (server) strips the questions array. A blind setRoomState(updatedRoom)
+      // would overwrite roomState.questions with undefined, breaking the timer auto-submit
+      // (questions.forEach loop in handleFinishBattle) and the question display.
+      // Fix: merge incoming data, keeping existing questions/endTime if the update strips them.
+      setRoomState(prev => {
+        if (!prev) return updatedRoom;
+        return {
+          ...prev,
+          ...updatedRoom,
+          // Preserve questions and endTime if the incoming update does not include them
+          questions: updatedRoom.questions || prev.questions,
+          endTime: updatedRoom.endTime || prev.endTime,
+          startTime: updatedRoom.startTime || prev.startTime,
+        };
+      });
     });
 
     newSocket.on('battle_started', ({ startTime, endTime, questions }) => {
@@ -130,10 +145,11 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
       console.log('[Battle] Socket reconnected — re-joining room');
       setRoomState(prev => {
         if (!prev?.roomCode) return prev;
-        // Re-join on LOBBY *and* IN_PROGRESS so the server can:
+        // Re-join on LOBBY, IN_PROGRESS, and FINISHED so the server can:
         //   - re-add us to the Socket.IO room (so we receive future broadcasts)
         //   - emit battle_started back to just our socket (IN_PROGRESS sync)
-        if (prev.status === 'LOBBY' || prev.status === 'IN_PROGRESS') {
+        //   - re-send battle_finished if results were broadcast before this reconnect (FINISHED)
+        if (prev.status === 'LOBBY' || prev.status === 'IN_PROGRESS' || prev.status === 'FINISHED') {
           console.log(`[Battle] Reconnect: re-joining room ${prev.roomCode} (status=${prev.status})`);
           newSocket.emit('join_room', { roomCode: prev.roomCode, user }, (response) => {
             if (response?.success) {
@@ -142,6 +158,8 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
               if (response.room?.status === 'LOBBY') {
                 setRoomState(response.room);
               }
+              // alreadyFinished: server re-sent battle_finished via join_room callback —
+              // the battle_finished socket event handler above handles the state update.
             }
           });
         }

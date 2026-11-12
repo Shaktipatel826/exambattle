@@ -279,7 +279,25 @@ export const initializeBattleSocket = (io) => {
       }
 
       if (room.status === 'FINISHED') {
-        if (typeof callback === 'function') callback({ success: false, message: 'Battle has already ended.' });
+        // ── RECONNECT FIX: re-deliver results to a player whose socket dropped after finish ──
+        // Root cause of "stuck on Waiting" in production:
+        //   1. finishBattle() emits battle_finished to the room (old socket IDs).
+        //   2. One player's Render WebSocket drops immediately after submission.
+        //   3. The client reconnects and calls join_room with a new socket ID.
+        //   4. Old code returned { success: false } here — new socket never got battle_finished.
+        //   5. Player stuck on "Exam Submitted! Waiting…" forever.
+        // Fix: re-emit battle_finished directly to this socket if results are cached.
+        const userId = user?.id || user?._id;
+        console.log(`[Battle] join_room: room ${cleanCode} is FINISHED — checking if ${userId} is a player to re-send results`);
+        const isKnownPlayer = room.players.some(p => String(p.userId) === String(userId));
+        if (isKnownPlayer && room._finishedPayload) {
+          socket.join(cleanCode);
+          console.log(`[Battle] join_room: re-sending battle_finished to reconnected player ${userId} (socket ${socket.id})`);
+          socket.emit('battle_finished', room._finishedPayload);
+          if (typeof callback === 'function') callback({ success: true, room: sanitizeRoomState(room), alreadyFinished: true });
+        } else {
+          if (typeof callback === 'function') callback({ success: false, message: 'Battle has already ended.' });
+        }
         return;
       }
 
@@ -781,6 +799,15 @@ async function finishBattle(room, io) {
     leaderboard,
     questions: room.questions   // includes referenceAnswer — revealed only after finish
   });
+
+  // ── RECONNECT FIX: cache the finished payload so join_room can re-deliver it ──
+  // If a player's WebSocket dropped at the exact moment of broadcast (common on Render
+  // free tier), they reconnect with a new socket ID and call join_room. We re-send
+  // battle_finished from join_room using this cached payload.
+  room._finishedPayload = {
+    leaderboard,
+    questions: room.questions
+  };
 
   console.log(`[Battle] battle_finished broadcast completed for room ${room.roomCode}: ${room.players.map(p => `${p.name}=${p.score}pts`).join(', ')}`);
 

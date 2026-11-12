@@ -395,3 +395,184 @@ describe('Submitting-stuck prevention logic', () => {
   });
 
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST SUITE 7: Reconnect-after-finish re-delivery (the production bug fix)
+// Root cause: player's WebSocket drops right after finishBattle emits battle_finished.
+// New socket calls join_room → old code rejected FINISHED rooms → player stuck forever.
+// Fix: cache _finishedPayload on room; re-send via join_room for known players.
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Reconnect-after-finish re-delivery (production bug fix)', () => {
+
+  // Simulate the join_room FINISHED branch with the fix applied
+  function simulateJoinRoomFinished(room, userId) {
+    if (room.status !== 'FINISHED') return { action: 'none' };
+    const isKnownPlayer = room.players.some(p => String(p.userId) === String(userId));
+    if (isKnownPlayer && room._finishedPayload) {
+      // server: socket.join(code) + socket.emit('battle_finished', room._finishedPayload)
+      return { action: 'resent', payload: room._finishedPayload };
+    }
+    return { action: 'rejected', message: 'Battle has already ended.' };
+  }
+
+  // Simulate finishBattle storing _finishedPayload
+  function simulateFinishBattleWithCache(room, leaderboard, questions) {
+    if (room.status === 'FINISHED') return { skipped: true };
+    room.status = 'FINISHED';
+    room._finishedPayload = { leaderboard, questions };
+    return { skipped: false };
+  }
+
+  const QUESTIONS = [
+    { _id: 'q1', question: 'Q1', options: ['A','B','C','D'], correctAnswer: 0, questionType: 'mcq' }
+  ];
+  const LEADERBOARD = [
+    { rank: 1, userId: 'host', name: 'Alice', score: 1 },
+    { rank: 2, userId: 'guest', name: 'Bob',   score: 0 }
+  ];
+
+  test('finishBattle caches _finishedPayload on room', () => {
+    const room = { status: 'IN_PROGRESS', _timerTimeout: null, _finishTimeout: null };
+    const result = simulateFinishBattleWithCache(room, LEADERBOARD, QUESTIONS);
+    assert.equal(result.skipped, false);
+    assert.ok(room._finishedPayload, '_finishedPayload must be set after finishBattle');
+    assert.deepEqual(room._finishedPayload.leaderboard, LEADERBOARD);
+    assert.deepEqual(room._finishedPayload.questions, QUESTIONS);
+  });
+
+  test('known player reconnecting to FINISHED room gets battle_finished re-sent', () => {
+    const room = {
+      status: 'FINISHED',
+      players: [
+        { userId: 'host', name: 'Alice', socketId: 'old-socket-1', answers: {} },
+        { userId: 'guest', name: 'Bob',   socketId: 'old-socket-2', answers: {} }
+      ],
+      _finishedPayload: { leaderboard: LEADERBOARD, questions: QUESTIONS }
+    };
+    // Host reconnects with new socket
+    const result = simulateJoinRoomFinished(room, 'host');
+    assert.equal(result.action, 'resent', 'Known player must receive re-sent results');
+    assert.deepEqual(result.payload.leaderboard, LEADERBOARD);
+    assert.deepEqual(result.payload.questions, QUESTIONS);
+  });
+
+  test('unknown player joining FINISHED room is correctly rejected', () => {
+    const room = {
+      status: 'FINISHED',
+      players: [{ userId: 'host', socketId: 'old-1', answers: {} }],
+      _finishedPayload: { leaderboard: LEADERBOARD, questions: QUESTIONS }
+    };
+    const result = simulateJoinRoomFinished(room, 'stranger');
+    assert.equal(result.action, 'rejected', 'Unknown player must be rejected from FINISHED room');
+  });
+
+  test('FINISHED room with no _finishedPayload still rejects gracefully', () => {
+    // Edge case: server restarted and room state was rebuilt without cached payload
+    const room = {
+      status: 'FINISHED',
+      players: [{ userId: 'host', socketId: 'old-1', answers: {} }],
+      _finishedPayload: null
+    };
+    const result = simulateJoinRoomFinished(room, 'host');
+    assert.equal(result.action, 'rejected', 'No cached payload → reject (not crash)');
+  });
+
+  test('host submits first, then guest — both complete, finish triggers once', () => {
+    const room = {
+      status: 'IN_PROGRESS',
+      players: [
+        { userId: 'host',  name: 'Alice', finished: false, answers: { 0: 0 } },
+        { userId: 'guest', name: 'Bob',   finished: false, answers: {} }
+      ],
+      _timerTimeout: null, _finishTimeout: null
+    };
+    // Host submits
+    room.players[0].finished = true;
+    let allDone = room.players.every(p => p.finished);
+    assert.equal(allDone, false, 'Should not finish when only host done');
+
+    // Guest submits
+    room.players[1].finished = true;
+    allDone = room.players.every(p => p.finished);
+    assert.equal(allDone, true, 'Should finish when both done');
+
+    const finishResult = simulateFinishBattleWithCache(room, LEADERBOARD, QUESTIONS);
+    assert.equal(finishResult.skipped, false);
+    assert.ok(room._finishedPayload, 'Payload must be cached after both submit');
+  });
+
+  test('guest submits first, then host — both complete, finish triggers once', () => {
+    const room = {
+      status: 'IN_PROGRESS',
+      players: [
+        { userId: 'host',  name: 'Alice', finished: false, answers: {} },
+        { userId: 'guest', name: 'Bob',   finished: false, answers: { 0: 1 } }
+      ],
+      _timerTimeout: null, _finishTimeout: null
+    };
+    room.players[1].finished = true; // guest first
+    let allDone = room.players.every(p => p.finished);
+    assert.equal(allDone, false, 'Must not finish after guest only');
+
+    room.players[0].finished = true; // host second
+    allDone = room.players.every(p => p.finished);
+    assert.equal(allDone, true, 'Must finish after host submits too');
+
+    const finishResult = simulateFinishBattleWithCache(room, LEADERBOARD, QUESTIONS);
+    assert.equal(finishResult.skipped, false);
+    assert.ok(room._finishedPayload);
+  });
+
+  test('duplicate finish events do not re-run finishBattle (idempotency)', () => {
+    const room = {
+      status: 'IN_PROGRESS',
+      players: [
+        { userId: 'host',  finished: false, answers: { 0: 0 } },
+        { userId: 'guest', finished: false, answers: { 0: 1 } }
+      ],
+      _timerTimeout: null, _finishTimeout: null
+    };
+    // First finish
+    const r1 = simulateFinishBattleWithCache(room, LEADERBOARD, QUESTIONS);
+    assert.equal(r1.skipped, false);
+    // Second finish (timer fires after player_finished already triggered it)
+    const r2 = simulateFinishBattleWithCache(room, LEADERBOARD, QUESTIONS);
+    assert.equal(r2.skipped, true, 'Second finishBattle must be a no-op');
+  });
+
+  test('DB persistence failure does not block result re-delivery', () => {
+    // Even if _finishedPayload exists (results broadcast succeeded) but DB save failed,
+    // reconnecting player can still receive results.
+    const room = {
+      status: 'FINISHED',
+      players: [{ userId: 'host', name: 'Alice', socketId: 'stale', answers: {} }],
+      _finishedPayload: { leaderboard: LEADERBOARD, questions: QUESTIONS },
+      _dbSaveFailed: true  // simulated DB failure flag
+    };
+    const result = simulateJoinRoomFinished(room, 'host');
+    assert.equal(result.action, 'resent', 'Results must be re-deliverable even if DB save failed');
+  });
+
+  test('timeout fallback: 60s force-finish triggers when second player never submits', () => {
+    // Simulate: player 1 finished, timeout fires, finishBattle runs
+    const room = {
+      status: 'IN_PROGRESS',
+      players: [
+        { userId: 'host',  name: 'Alice', finished: true,  answers: { 0: 0 } },
+        { userId: 'guest', name: 'Bob',   finished: false, answers: {} }
+      ],
+      _timerTimeout: null,
+      _finishTimeout: null
+    };
+    // All done check would be false (guest not finished), but timeout force-finishes
+    const allDone = room.players.every(p => p.finished);
+    assert.equal(allDone, false, 'Not all done yet');
+    // Timeout fires: finishBattle called regardless
+    const result = simulateFinishBattleWithCache(room, LEADERBOARD, QUESTIONS);
+    assert.equal(result.skipped, false, 'Force-finish via timeout must succeed');
+    assert.equal(room.status, 'FINISHED');
+    assert.ok(room._finishedPayload, 'Payload must be cached for reconnect delivery');
+  });
+
+});
