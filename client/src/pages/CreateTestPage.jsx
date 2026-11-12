@@ -242,9 +242,24 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
   }, [pasteFormat]);
 
   // ─── Client-side MCQ parser (preview before saving) ───────────────────────
+  // FIX-4: Option regex uses \s* (space optional) so "A.Text" and "A. Text" both work
+  const MCQ_OPTION_REGEX = /^([A-Da-d])\s*[.)]\s*([\s\S]+)/i;
+  const MCQ_OPTION_LINE_TEST = /^[A-Da-d]\s*[.)]\s*/i;
+
+  // FIX-1: Detect language from text content
+  const detectMcqLanguage = (text) => {
+    const hasHindi = /[\u0900-\u097F]/.test(text);
+    const hasLatin = /[A-Za-z]/.test(text);
+    if (hasHindi && hasLatin) return 'bilingual';
+    if (hasHindi) return 'hi';
+    return 'en';
+  };
+
   const parseMCQText = (text) => {
     const valid = [];
     const invalid = [];
+    // FIX-2: Track normalized questions seen in this preview batch
+    const seenInBatch = new Set();
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     let i = 0;
 
@@ -257,9 +272,10 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
       let questionText = (qMatch[2] || '').trim();
       i++;
 
+      // FIX-4: use updated option line test
       while (i < lines.length) {
         const next = lines[i].trim();
-        if (/^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        if (MCQ_OPTION_LINE_TEST.test(next)) break;
         if (/^Q\s*\d+\s*[:.]/i.test(next)) break;
         if (/^(Answer|Ans|Correct\s*Answer)\s*:/i.test(next)) break;
         questionText += (next ? ' ' + next : '');
@@ -267,10 +283,11 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
       }
       questionText = questionText.trim();
 
+      // FIX-4: use updated option regex
       const options = [];
       while (i < lines.length && options.length < 4) {
         const next = lines[i].trim();
-        const optMatch = next.match(/^([A-Da-d])\s*[.)]\s+([\s\S]+)/i);
+        const optMatch = next.match(MCQ_OPTION_REGEX);
         if (!optMatch) break;
         options.push(optMatch[2].trim());
         i++;
@@ -285,7 +302,8 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
           i++;
           break;
         }
-        if (/^Q\s*\d+\s*[:.]/i.test(next) || /^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        // FIX-4: use updated option line test in break condition
+        if (/^Q\s*\d+\s*[:.]/i.test(next) || MCQ_OPTION_LINE_TEST.test(next)) break;
         i++;
       }
 
@@ -319,8 +337,18 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
         continue;
       }
 
+      // FIX-2: Within-batch duplicate detection
+      const normalizedQ = questionText.toLowerCase().replace(/\s+/g, ' ').trim();
+      if (seenInBatch.has(normalizedQ)) {
+        invalid.push({ questionNumber: qNum, text: questionText.substring(0, 60), reason: 'Duplicate question detected within this batch — skipped.' });
+        continue;
+      }
+      seenInBatch.add(normalizedQ);
+
       const correctIndex = correctLetter.charCodeAt(0) - 65;
-      valid.push({ questionNumber: qNum, questionText, options, correctIndex, explanation });
+      // FIX-1: Detect language for preview display
+      const detectedLanguage = detectMcqLanguage(questionText + ' ' + options.join(' '));
+      valid.push({ questionNumber: qNum, questionText, options, correctIndex, explanation, language: detectedLanguage });
     }
 
     return { valid, invalid };

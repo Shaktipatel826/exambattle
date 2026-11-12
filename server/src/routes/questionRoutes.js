@@ -222,6 +222,22 @@ router.delete('/:id', authMiddleware, adminGuard, async (req, res) => {
 // POST /api/questions/bulk-mcq
 // Body: { text, subject, topic, difficulty }
 // Parses plain-text MCQ blocks (Q1:/A./B./C./D./Answer:) and saves valid ones.
+
+// FIX-1: Detect language from text content (Devanagari Unicode range U+0900–U+097F)
+function detectLanguage(text) {
+  const hasHindi = /[\u0900-\u097F]/.test(text);
+  const hasLatin = /[A-Za-z]/.test(text);
+  if (hasHindi && hasLatin) return 'bilingual';
+  if (hasHindi) return 'hi';
+  return 'en';
+}
+
+// FIX-4: Option regex now uses \s* (zero or more spaces) instead of \s+ (one or more)
+// so both "A. Text" and "A.Text" are accepted.
+const OPTION_REGEX = /^([A-Da-d])\s*[.)]\s*([\s\S]+)/i;
+// Same pattern used in multi-line question break condition
+const OPTION_LINE_TEST = /^[A-Da-d]\s*[.)]\s*/i;
+
 router.post('/bulk-mcq', authMiddleware, async (req, res) => {
   try {
     const { text, subject, topic, difficulty } = req.body;
@@ -238,6 +254,8 @@ router.post('/bulk-mcq', authMiddleware, async (req, res) => {
     // ── Parser ──────────────────────────────────────────────────────────────
     const valid = [];
     const invalid = [];
+    // FIX-2: Track normalized question texts seen in this batch to deduplicate
+    const seenInBatch = new Set();
 
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     let i = 0;
@@ -254,9 +272,10 @@ router.post('/bulk-mcq', authMiddleware, async (req, res) => {
       i++;
 
       // Collect multi-line question text until A. / B. etc.
+      // FIX-4: use updated OPTION_LINE_TEST (accepts A.Text without space)
       while (i < lines.length) {
         const next = lines[i].trim();
-        if (/^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        if (OPTION_LINE_TEST.test(next)) break;
         if (/^Q\s*\d+\s*[:.]/i.test(next)) break;
         if (/^(Answer|Ans|Correct\s*Answer)\s*:/i.test(next)) break;
         questionText += (next ? ' ' + next : '');
@@ -265,10 +284,11 @@ router.post('/bulk-mcq', authMiddleware, async (req, res) => {
       questionText = questionText.trim();
 
       // Collect exactly 4 options A B C D
+      // FIX-4: use OPTION_REGEX (accepts A.Text without space)
       const options = [];
       while (i < lines.length && options.length < 4) {
         const next = lines[i].trim();
-        const optMatch = next.match(/^([A-Da-d])\s*[.)]\s+([\s\S]+)/i);
+        const optMatch = next.match(OPTION_REGEX);
         if (!optMatch) break;
         options.push(optMatch[2].trim());
         i++;
@@ -285,7 +305,7 @@ router.post('/bulk-mcq', authMiddleware, async (req, res) => {
           break;
         }
         // Stop if we hit next question or option
-        if (/^Q\s*\d+\s*[:.]/i.test(next) || /^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        if (/^Q\s*\d+\s*[:.]/i.test(next) || OPTION_LINE_TEST.test(next)) break;
         // skip blank or unrecognised line before answer
         i++;
       }
@@ -325,17 +345,30 @@ router.post('/bulk-mcq', authMiddleware, async (req, res) => {
         continue;
       }
 
+      // FIX-2: Within-batch duplicate detection (normalized: lowercase + collapse whitespace)
+      const normalizedQ = questionText.toLowerCase().replace(/\s+/g, ' ').trim();
+      if (seenInBatch.has(normalizedQ)) {
+        invalid.push({ questionNumber: qNum, text: questionText.substring(0, 60), reason: 'Duplicate question detected within this batch — skipped.' });
+        continue;
+      }
+      seenInBatch.add(normalizedQ);
+
       const correctIndex = correctLetter.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+
+      // FIX-1: Detect language from combined question + options text
+      const combinedText = questionText + ' ' + options.join(' ');
+      const detectedLanguage = detectLanguage(combinedText);
 
       valid.push({
         question: questionText,
         options,
         correctAnswer: correctIndex,
+        questionType: 'mcq',          // FIX-3: explicitly stored
         explanation,
         subject: subject || 'General Studies',
         topic: topic || subject || 'General',
         difficulty: (difficulty && difficulty !== 'Mixed') ? difficulty : 'Medium',
-        language: 'en',
+        language: detectedLanguage,   // FIX-1: auto-detected
         source: 'Manual Entry',
         sourceType: isAdmin ? 'ADMIN_CREATED' : 'STUDENT_PERSONAL',
         verified: isAdmin,

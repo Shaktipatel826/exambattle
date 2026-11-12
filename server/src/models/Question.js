@@ -4,6 +4,7 @@ const questionSchema = new mongoose.Schema({
   question: { type: String, required: true },
   options: [{ type: String, required: true }], // 4 options A, B, C, D
   correctAnswer: { type: Number, required: true }, // Index 0, 1, 2, or 3
+  questionType: { type: String, enum: ['mcq', 'short_answer'], default: 'mcq' }, // FIX-3: stored for reliable type identification
   explanation: { type: String, default: '' },
   subject: { type: String, required: true, index: true },
   subSubject: { type: String, default: '' },
