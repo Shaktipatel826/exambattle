@@ -48,11 +48,63 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
   const [startBattleError, setStartBattleError] = useState('');
   const [startingBattle, setStartingBattle] = useState(false);
 
+  // ── Battle-Start Apply (stable ref) ─────────────────────────────────────────
+  // Ref so this function can be called from BOTH the battle_started socket event
+  // (all players) AND the start_battle ack (host fallback guarantee).
+  // Using a ref avoids stale closure issues with the socket useEffect's [] deps.
+  const applyBattleStartedRef = React.useRef(null);
+  applyBattleStartedRef.current = (startTime, endTime, questions) => {
+    setRoomState(prev => {
+      if (!prev) return prev;
+      if (prev.status === 'IN_PROGRESS') {
+        // Reconnect-sync: preserve player progress, just restore questions/timer
+        console.log('[Battle] battle_started: reconnect-sync — preserving player progress');
+        return { ...prev, questions, startTime, endTime };
+      }
+      // Fresh start: transition LOBBY → IN_PROGRESS
+      console.log('[Battle] battle_started: fresh start — transitioning to IN_PROGRESS');
+      return { ...prev, status: 'IN_PROGRESS', questions, startTime, endTime };
+    });
+    // Reset per-question progress OUTSIDE the updater (safe to call setters here)
+    setCurrentQIndex(0);
+    setSelectedAnswers({});
+    // Sync server-authoritative timer
+    const remainingSecs = Math.floor((endTime - Date.now()) / 1000);
+    setTimeLeft(Math.max(0, remainingSecs));
+  };
+
   // ── Socket Setup ────────────────────────────────────────────────────────────
   useEffect(() => {
     const socketUrl = getSocketUrl();
     const newSocket = io(socketUrl, { transports: ['websocket', 'polling'] });
     setSocket(newSocket);
+
+    // Helper: apply a battle_started payload to local state.
+    // Called from both the battle_started socket event AND the start_battle ack
+    // so the host always transitions to IN_PROGRESS (even if the socket.io room
+    // broadcast doesn't reach the host's socket due to a Render reconnection).
+    const applyBattleStarted = (startTime, endTime, questions) => {
+      setRoomState(prev => {
+        if (!prev) return prev; // no room joined yet — ignore
+        if (prev.status === 'IN_PROGRESS') {
+          // Reconnect-sync: server re-sent battle_started to restore questions.
+          // Preserve the player's current question index and answers.
+          console.log('[Battle] battle_started: reconnect-sync — preserving player progress');
+          return { ...prev, questions, startTime, endTime };
+        }
+        // Fresh start: transition to IN_PROGRESS
+        console.log('[Battle] battle_started: fresh start — transitioning to IN_PROGRESS');
+        return { ...prev, status: 'IN_PROGRESS', questions, startTime, endTime };
+      });
+      // Reset per-question progress OUTSIDE the state updater (no side-effects inside updater)
+      setCurrentQIndex(0);
+      setSelectedAnswers({});
+      // Sync server-authoritative countdown timer
+      const remainingSecs = Math.floor((endTime - Date.now()) / 1000);
+      setTimeLeft(Math.max(0, remainingSecs));
+    };
+    // Expose via ref so handleStartBattle can call it from the ack callback
+    applyBattleStartedRef.current = applyBattleStarted;
 
     newSocket.on('connect_error', (err) => {
       console.error('[Socket] Connect error:', err.message);
@@ -69,23 +121,9 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
 
     newSocket.on('battle_started', ({ startTime, endTime, questions }) => {
       console.log('[Battle] battle_started received by client — navigating to question screen');
-      setRoomState(prev => {
-        const alreadyInProgress = prev?.status === 'IN_PROGRESS';
-        // On a reconnect-sync the server re-sends battle_started to restore the
-        // question list. Preserve the player's current question index and answers
-        // so they don't lose progress mid-battle.
-        if (alreadyInProgress) {
-          console.log('[Battle] battle_started: reconnect-sync — preserving player progress');
-          return { ...prev, questions, startTime, endTime };
-        }
-        // Fresh start: reset index and answers
-        setCurrentQIndex(0);
-        setSelectedAnswers({});
-        return prev ? { ...prev, status: 'IN_PROGRESS', questions, startTime, endTime } : prev;
-      });
-      // Always sync the countdown timer (catches drift on reconnect too)
-      const remainingSecs = Math.floor((endTime - Date.now()) / 1000);
-      setTimeLeft(Math.max(0, remainingSecs));
+      // This handler fires for ALL players (guests and host-via-room-broadcast).
+      // The host also processes this in the start_battle ack (below) as a fallback.
+      applyBattleStarted(startTime, endTime, questions);
     });
 
     newSocket.on('reconnect', () => {
@@ -255,9 +293,23 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
       (response) => {
         clearTimeout(timeoutId);
         setStartingBattle(false);
-        console.log('[Battle] start_battle ack:', response);
-        if (response && !response.success) {
+        console.log('[Battle] start_battle ack:', JSON.stringify(response));
+        if (!response) return;
+        if (!response.success) {
           setStartBattleError(response.message || 'Failed to start battle. Please try again.');
+          return;
+        }
+        // ── HOST GUARANTEE FIX ───────────────────────────────────────────────
+        // The server includes {startTime, endTime, questions} in the success ack.
+        // Apply it directly here so the host ALWAYS transitions to IN_PROGRESS,
+        // even if the socket.io room broadcast didn't reach this socket
+        // (which happens after a Render WebSocket reconnection where the new
+        // socket ID was not yet in the socket.io room at broadcast time).
+        if (response.startTime && response.endTime && response.questions) {
+          console.log('[Battle] start_battle ack: applying battle_started directly to host (fallback guarantee)');
+          if (applyBattleStartedRef.current) {
+            applyBattleStartedRef.current(response.startTime, response.endTime, response.questions);
+          }
         }
       }
     );

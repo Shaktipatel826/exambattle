@@ -462,8 +462,13 @@ export const initializeBattleSocket = (io) => {
         console.log(`[Battle]   → ${p.name} (userId=${p.userId}, socketId=${p.socketId})`);
       });
 
+      // Broadcast to entire Socket.IO room (reaches guests)
       io.to(cleanCode).emit('battle_started', battlePayload);
-      if (typeof callback === 'function') callback({ success: true });
+
+      // Also include battlePayload in the ack so the HOST can apply it directly.
+      // This guarantees the host transitions to IN_PROGRESS even if its socket
+      // is not in the Socket.IO room at broadcast time (e.g. after a Render reconnect).
+      if (typeof callback === 'function') callback({ success: true, ...battlePayload });
     });
 
     // Submit Answer for a Question (Live status update WITHOUT leaking chosen option)
