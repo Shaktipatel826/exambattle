@@ -218,6 +218,168 @@ router.delete('/:id', authMiddleware, adminGuard, async (req, res) => {
   }
 });
 
+// 6. Bulk MCQ Parse + Save
+// POST /api/questions/bulk-mcq
+// Body: { text, subject, topic, difficulty }
+// Parses plain-text MCQ blocks (Q1:/A./B./C./D./Answer:) and saves valid ones.
+router.post('/bulk-mcq', authMiddleware, async (req, res) => {
+  try {
+    const { text, subject, topic, difficulty } = req.body;
+
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ success: false, message: 'MCQ text is required.' });
+    }
+    if (!subject) {
+      return res.status(400).json({ success: false, message: 'Subject is required.' });
+    }
+
+    const isAdmin = req.user && req.user.role === 'ADMIN';
+
+    // ── Parser ──────────────────────────────────────────────────────────────
+    const valid = [];
+    const invalid = [];
+
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i].trim();
+
+      // Find question line: Q1: or Q1.
+      const qMatch = line.match(/^Q\s*(\d+)\s*[:.][\s]*([\s\S]*)?/i);
+      if (!qMatch) { i++; continue; }
+
+      const qNum = parseInt(qMatch[1], 10);
+      let questionText = (qMatch[2] || '').trim();
+      i++;
+
+      // Collect multi-line question text until A. / B. etc.
+      while (i < lines.length) {
+        const next = lines[i].trim();
+        if (/^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        if (/^Q\s*\d+\s*[:.]/i.test(next)) break;
+        if (/^(Answer|Ans|Correct\s*Answer)\s*:/i.test(next)) break;
+        questionText += (next ? ' ' + next : '');
+        i++;
+      }
+      questionText = questionText.trim();
+
+      // Collect exactly 4 options A B C D
+      const options = [];
+      while (i < lines.length && options.length < 4) {
+        const next = lines[i].trim();
+        const optMatch = next.match(/^([A-Da-d])\s*[.)]\s+([\s\S]+)/i);
+        if (!optMatch) break;
+        options.push(optMatch[2].trim());
+        i++;
+      }
+
+      // Parse answer line: Ans: A / Answer: B / Correct Answer: C
+      let correctLetter = '';
+      while (i < lines.length) {
+        const next = lines[i].trim();
+        if (/^(Answer|Ans|Correct\s*Answer)\s*:/i.test(next)) {
+          const aMatch = next.match(/^(?:Answer|Ans|Correct\s*Answer)\s*:\s*([A-Da-d])/i);
+          if (aMatch) correctLetter = aMatch[1].toUpperCase();
+          i++;
+          break;
+        }
+        // Stop if we hit next question or option
+        if (/^Q\s*\d+\s*[:.]/i.test(next) || /^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        // skip blank or unrecognised line before answer
+        i++;
+      }
+
+      // Parse optional explanation
+      let explanation = '';
+      if (i < lines.length && /^Explanation\s*:/i.test(lines[i].trim())) {
+        const expMatch = lines[i].trim().match(/^Explanation\s*:\s*(.*)/i);
+        explanation = (expMatch?.[1] || '').trim();
+        i++;
+        while (i < lines.length) {
+          const el = lines[i].trim();
+          if (/^Q\s*\d+\s*[:.]/i.test(el)) break;
+          if (el === '') { i++; break; }
+          explanation += ' ' + el;
+          i++;
+        }
+        explanation = explanation.trim();
+      }
+
+      // Skip blank lines
+      while (i < lines.length && lines[i].trim() === '') i++;
+
+      // ── Validation ──────────────────────────────────────────────────
+      const ref = `Q${qNum}`;
+
+      if (!questionText) {
+        invalid.push({ questionNumber: qNum, text: ref, reason: 'Question text is empty.' });
+        continue;
+      }
+      if (options.length !== 4) {
+        invalid.push({ questionNumber: qNum, text: questionText.substring(0, 60), reason: `Expected 4 options (A/B/C/D), found ${options.length}.` });
+        continue;
+      }
+      if (!correctLetter || !['A', 'B', 'C', 'D'].includes(correctLetter)) {
+        invalid.push({ questionNumber: qNum, text: questionText.substring(0, 60), reason: 'Missing or invalid answer (expected Ans: A/B/C/D).' });
+        continue;
+      }
+
+      const correctIndex = correctLetter.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+
+      valid.push({
+        question: questionText,
+        options,
+        correctAnswer: correctIndex,
+        explanation,
+        subject: subject || 'General Studies',
+        topic: topic || subject || 'General',
+        difficulty: (difficulty && difficulty !== 'Mixed') ? difficulty : 'Medium',
+        language: 'en',
+        source: 'Manual Entry',
+        sourceType: isAdmin ? 'ADMIN_CREATED' : 'STUDENT_PERSONAL',
+        verified: isAdmin,
+        status: isAdmin ? 'PUBLISHED' : 'PENDING_REVIEW',
+        createdBy: req.user.name || 'System',
+        duplicateFlag: false,
+      });
+    }
+
+    // ── Save valid questions ─────────────────────────────────────────────────
+    let savedCount = 0;
+    let saveErrors = [];
+
+    if (valid.length > 0) {
+      try {
+        const inserted = await Question.insertMany(valid, { ordered: false });
+        savedCount = inserted.length;
+      } catch (bulkErr) {
+        // insertMany with ordered:false returns partial results on duplicate key errors
+        if (bulkErr.insertedDocs) {
+          savedCount = bulkErr.insertedDocs.length;
+        } else if (bulkErr.result && bulkErr.result.nInserted !== undefined) {
+          savedCount = bulkErr.result.nInserted;
+        } else {
+          saveErrors.push(bulkErr.message);
+        }
+      }
+    }
+
+    return res.status(201).json({
+      success: true,
+      totalParsed: valid.length + invalid.length,
+      valid: valid.length,
+      invalid: invalid.length,
+      saved: savedCount,
+      errors: invalid,
+      saveErrors
+    });
+  } catch (err) {
+    console.error('[bulk-mcq] Unexpected error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // 6. Report a Question
 router.post('/:id/report', authMiddleware, async (req, res) => {
   try {

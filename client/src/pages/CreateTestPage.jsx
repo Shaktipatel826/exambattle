@@ -37,7 +37,7 @@ const PIPELINE_STEPS = [
   { id: 7, label: 'Preparing test preview' },
 ];
 
-/** The reusable prompt students copy into ChatGPT / Gemini / Claude */
+/** Prompt for Direct Q&A (no options) */
 const EXTERNAL_AI_PROMPT = `You are helping me prepare for Indian competitive exams (SSC CGL, Railway NTPC, UP Police, UPSC, Banking).
 
 Study the material I will provide carefully. Generate direct question-and-answer pairs from it.
@@ -58,6 +58,36 @@ Rules:
 - Questions can be in Hindi, English, or a mix — match the source language.
 - Do NOT invent facts. Only use information from the provided material.
 - Generate as many meaningful questions as the material supports.
+- Do not repeat the same question twice.`;
+
+/** Prompt for MCQ (4 options) */
+const MCQ_AI_PROMPT = `Generate MCQ questions for Indian competitive exams (SSC CGL, Railway NTPC, UP Police, UPSC, Banking).
+
+Use EXACTLY this format for every question:
+
+Q1: Question text here
+A. Option one
+B. Option two
+C. Option three
+D. Option four
+Answer: A
+
+Q2: अगला सवाल यहाँ
+A. विकल्प एक
+B. विकल्प दो
+C. विकल्प तीन
+D. विकल्प चार
+Answer: B
+Explanation: Optional explanation if needed.
+
+Rules:
+- Every question MUST have exactly four options: A, B, C, D.
+- Exactly one correct answer per question (A, B, C, or D).
+- Distribute correct answers — do NOT always place the answer at option A.
+- Accept answer as: Answer: A  or  Ans: B  or  Correct Answer: C
+- Explanation is optional — include only if useful.
+- Questions can be in Hindi, English, or a mix.
+- Do NOT add JSON, tables, commentary, or numbering beyond Q1, Q2…
 - Do not repeat the same question twice.`;
 
 function VerdictBadge({ verdict }) {
@@ -105,12 +135,19 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
   const fileRef = useRef();
 
   // ─── Paste Q&A State ──────────────────────────────────────────────────────
+  const [pasteFormat, setPasteFormat] = useState('qa'); // 'qa' | 'mcq'
   const [testTitle, setTestTitle] = useState('');
   const [qaText, setQaText] = useState('');
   const [parsing, setParsing] = useState(false);
   const [parseErrors, setParseErrors] = useState([]);
   const [parseStats, setParseStats] = useState(null);
   const [promptCopied, setPromptCopied] = useState(false);
+  // MCQ-specific state
+  const [mcqText, setMcqText] = useState('');
+  const [mcqParsed, setMcqParsed] = useState(null); // { valid, invalid }
+  const [mcqSaving, setMcqSaving] = useState(false);
+  const [mcqSaveResult, setMcqSaveResult] = useState(null); // { saved, errors }
+  const [mcqError, setMcqError] = useState('');
 
   // ─── Shared Preview/Save/Room State ───────────────────────────────────────
   const [questions, setQuestions] = useState([]);
@@ -142,6 +179,12 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
     setParseStats(null);
     setQaText('');
     setTestTitle('');
+    setPasteFormat('qa');
+    setMcqText('');
+    setMcqParsed(null);
+    setMcqSaving(false);
+    setMcqSaveResult(null);
+    setMcqError('');
     setExpandedQ(null);
     setEditingQ(null);
     setEditDraft(null);
@@ -178,16 +221,17 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
 
   const getWordCount = (text) => text.trim().split(/\s+/).filter(Boolean).length;
 
-  // ─── Copy Prompt ──────────────────────────────────────────────────────────
+  // ─── Copy Prompt (handles both formats) ──────────────────────────────────
   const copyPrompt = useCallback(async () => {
+    const promptText = pasteFormat === 'mcq' ? MCQ_AI_PROMPT : EXTERNAL_AI_PROMPT;
     try {
-      await navigator.clipboard.writeText(EXTERNAL_AI_PROMPT);
+      await navigator.clipboard.writeText(promptText);
       setPromptCopied(true);
       setTimeout(() => setPromptCopied(false), 2500);
     } catch {
       // Fallback for browsers that block clipboard
       const ta = document.createElement('textarea');
-      ta.value = EXTERNAL_AI_PROMPT;
+      ta.value = promptText;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
@@ -195,7 +239,140 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
       setPromptCopied(true);
       setTimeout(() => setPromptCopied(false), 2500);
     }
-  }, []);
+  }, [pasteFormat]);
+
+  // ─── Client-side MCQ parser (preview before saving) ───────────────────────
+  const parseMCQText = (text) => {
+    const valid = [];
+    const invalid = [];
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i].trim();
+      const qMatch = line.match(/^Q\s*(\d+)\s*[:.][\s]*([\s\S]*)?/i);
+      if (!qMatch) { i++; continue; }
+
+      const qNum = parseInt(qMatch[1], 10);
+      let questionText = (qMatch[2] || '').trim();
+      i++;
+
+      while (i < lines.length) {
+        const next = lines[i].trim();
+        if (/^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        if (/^Q\s*\d+\s*[:.]/i.test(next)) break;
+        if (/^(Answer|Ans|Correct\s*Answer)\s*:/i.test(next)) break;
+        questionText += (next ? ' ' + next : '');
+        i++;
+      }
+      questionText = questionText.trim();
+
+      const options = [];
+      while (i < lines.length && options.length < 4) {
+        const next = lines[i].trim();
+        const optMatch = next.match(/^([A-Da-d])\s*[.)]\s+([\s\S]+)/i);
+        if (!optMatch) break;
+        options.push(optMatch[2].trim());
+        i++;
+      }
+
+      let correctLetter = '';
+      while (i < lines.length) {
+        const next = lines[i].trim();
+        if (/^(Answer|Ans|Correct\s*Answer)\s*:/i.test(next)) {
+          const aMatch = next.match(/^(?:Answer|Ans|Correct\s*Answer)\s*:\s*([A-Da-d])/i);
+          if (aMatch) correctLetter = aMatch[1].toUpperCase();
+          i++;
+          break;
+        }
+        if (/^Q\s*\d+\s*[:.]/i.test(next) || /^[A-Da-d]\s*[.)]\s+/i.test(next)) break;
+        i++;
+      }
+
+      let explanation = '';
+      if (i < lines.length && /^Explanation\s*:/i.test(lines[i].trim())) {
+        const expMatch = lines[i].trim().match(/^Explanation\s*:\s*(.*)/i);
+        explanation = (expMatch?.[1] || '').trim();
+        i++;
+        while (i < lines.length) {
+          const el = lines[i].trim();
+          if (/^Q\s*\d+\s*[:.]/i.test(el)) break;
+          if (el === '') { i++; break; }
+          explanation += ' ' + el;
+          i++;
+        }
+        explanation = explanation.trim();
+      }
+
+      while (i < lines.length && lines[i].trim() === '') i++;
+
+      if (!questionText) {
+        invalid.push({ questionNumber: qNum, text: `Q${qNum}`, reason: 'Question text is empty.' });
+        continue;
+      }
+      if (options.length !== 4) {
+        invalid.push({ questionNumber: qNum, text: questionText.substring(0, 60), reason: `Expected 4 options (A/B/C/D), found ${options.length}.` });
+        continue;
+      }
+      if (!correctLetter || !['A', 'B', 'C', 'D'].includes(correctLetter)) {
+        invalid.push({ questionNumber: qNum, text: questionText.substring(0, 60), reason: 'Missing or invalid answer (expected Ans: A/B/C/D).' });
+        continue;
+      }
+
+      const correctIndex = correctLetter.charCodeAt(0) - 65;
+      valid.push({ questionNumber: qNum, questionText, options, correctIndex, explanation });
+    }
+
+    return { valid, invalid };
+  };
+
+  // ─── Handle MCQ Preview ────────────────────────────────────────────────────
+  const handleMcqPreview = () => {
+    setMcqError('');
+    setMcqSaveResult(null);
+    if (!mcqText.trim()) {
+      setMcqError('Please paste your MCQ text first.');
+      return;
+    }
+    const result = parseMCQText(mcqText);
+    setMcqParsed(result);
+    if (result.valid.length === 0 && result.invalid.length === 0) {
+      setMcqError('No questions detected. Make sure each question starts with Q1:, Q2: etc.');
+    }
+  };
+
+  // ─── Handle MCQ Save to Question Bank ─────────────────────────────────────
+  const handleMcqSave = async () => {
+    if (!mcqText.trim()) return;
+    setMcqSaving(true);
+    setMcqError('');
+    setMcqSaveResult(null);
+    try {
+      const res = await fetch('/api/questions/bulk-mcq', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: mcqText,
+          subject,
+          topic: topic || subject,
+          difficulty: difficulty === 'Mixed' ? 'Medium' : difficulty
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setMcqError(data.message || 'Save failed. Please try again.');
+      } else {
+        setMcqSaveResult(data);
+      }
+    } catch (err) {
+      setMcqError(`Network error: ${err.message}`);
+    } finally {
+      setMcqSaving(false);
+    }
+  };
 
   // ─── Parse Q&A Text ───────────────────────────────────────────────────────
   const handleParseText = async () => {
@@ -607,20 +784,54 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
             </div>
           </div>
 
-          {/* Step 2: Prompt Box */}
-          <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-3">
+          {/* Step 2: Format selector + Prompt Box */}
+          <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-4">
             <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[#244A73]" />
               Generate Questions Using Any AI
             </h2>
+
+            {/* Format selector tabs */}
+            <div className="flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => { setPasteFormat('qa'); setMcqParsed(null); setMcqSaveResult(null); setMcqError(''); }}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                  pasteFormat === 'qa'
+                    ? 'bg-[#244A73] text-white border-[#244A73] shadow'
+                    : 'bg-[#F7F3EA] text-[#66635D] border-[#E2DACB] hover:bg-[#EFE9DC]'
+                }`}
+              >
+                ✍️ Without Options (Direct Q&amp;A)
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPasteFormat('mcq'); setParseErrors([]); setParseStats(null); setError(''); }}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                  pasteFormat === 'mcq'
+                    ? 'bg-[#244A73] text-white border-[#244A73] shadow'
+                    : 'bg-[#F7F3EA] text-[#66635D] border-[#E2DACB] hover:bg-[#EFE9DC]'
+                }`}
+              >
+                🔢 With Options (MCQ – 4 Options)
+              </button>
+            </div>
+
+            {/* Instructions */}
             <ol className="text-xs text-[#66635D] space-y-1 list-none pl-0">
-              {[
+              {(pasteFormat === 'qa' ? [
                 'Copy the prompt below.',
                 'Open ChatGPT, Gemini, Claude or any other AI tool.',
                 'Upload your PDF, textbook images, notes or study material.',
                 'Paste the prompt and ask the AI to generate direct Q&A pairs (no MCQ options).',
                 'Copy the AI\'s output and paste it into the box below.',
-              ].map((step, i) => (
+              ] : [
+                'Copy the MCQ prompt below.',
+                'Open ChatGPT, Gemini, Claude or any other AI tool.',
+                'Tell the AI your topic and how many questions you need.',
+                'Paste the prompt. The AI will generate questions with A/B/C/D options.',
+                'Copy the AI\'s output and paste it into the box below. Save directly to Question Bank.',
+              ]).map((step, i) => (
                 <li key={i} className="flex items-start gap-2">
                   <span className="shrink-0 w-5 h-5 rounded-full bg-[#244A73]/10 text-[#244A73] text-[10px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
                   <span>{step}</span>
@@ -631,7 +842,7 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
             {/* Copyable prompt */}
             <div className="relative">
               <pre className="text-[10px] leading-relaxed text-[#252525] bg-[#F7F3EA] border border-[#D5CDBF] rounded-xl p-3 overflow-auto max-h-48 whitespace-pre-wrap font-mono">
-                {EXTERNAL_AI_PROMPT}
+                {pasteFormat === 'mcq' ? MCQ_AI_PROMPT : EXTERNAL_AI_PROMPT}
               </pre>
               <button
                 type="button"
@@ -648,16 +859,17 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
             </div>
           </div>
 
-          {/* Step 3: Paste Q&A */}
-          <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-3">
-            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-              <ClipboardPaste className="w-4 h-4 text-[#244A73]" />
-              Paste AI-Generated Q&amp;A
-            </h2>
-            <p className="text-xs text-[#66635D]">
-              Paste the AI output here. Each question must follow this format — <strong>no A/B/C/D options needed</strong>:
-            </p>
-            <div className="bg-[#F7F3EA] border border-[#D5CDBF] rounded-xl p-3 text-[10px] font-mono text-[#252525] leading-relaxed whitespace-pre">
+          {/* Step 3a: Direct Q&A paste area */}
+          {pasteFormat === 'qa' && (
+            <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-3">
+              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+                <ClipboardPaste className="w-4 h-4 text-[#244A73]" />
+                Paste AI-Generated Q&amp;A
+              </h2>
+              <p className="text-xs text-[#66635D]">
+                Paste the AI output here. Each question must follow this format — <strong>no A/B/C/D options needed</strong>:
+              </p>
+              <div className="bg-[#F7F3EA] border border-[#D5CDBF] rounded-xl p-3 text-[10px] font-mono text-[#252525] leading-relaxed whitespace-pre">
 {`Q1: भारत के प्रथम राष्ट्रपति कौन थे?
 Answer: डॉ. राजेंद्र प्रसाद
 
@@ -667,56 +879,204 @@ Explanation: भारत 15 अगस्त 1947 को ब्रिटिश �
 
 Q3: Who founded the Maurya Empire?
 Answer: Chandragupta Maurya`}
+              </div>
+              <textarea
+                rows={12}
+                placeholder={"Paste the Q&A output from ChatGPT / Gemini / Claude here…\n\nExample:\nQ1: भारत के प्रथम राष्ट्रपति कौन थे?\nAnswer: डॉ. राजेंद्र प्रसाद\n\nQ2: Who founded the Maurya Empire?\nAnswer: Chandragupta Maurya"}
+                value={qaText}
+                onChange={e => setQaText(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-xs resize-y focus:outline-none focus:border-[#244A73] transition-colors font-mono"
+                dir="auto"
+              />
+              {qaText.trim() && (
+                <p className="text-[10px] text-[#66635D]">
+                  {qaText.trim().length.toLocaleString()} chars pasted
+                </p>
+              )}
+
+              {error && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {parseErrors.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-bold text-amber-700">Parse errors ({parseErrors.length}):</p>
+                  {parseErrors.map((e, i) => (
+                    <div key={i} className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      <strong>{e.ref}:</strong> {e.issue}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleParseText}
+                disabled={parsing || !qaText.trim()}
+                className="w-full flex items-center justify-center gap-2 bg-[#244A73] text-white font-bold py-3 rounded-xl hover:bg-[#1a3a5c] transition-colors shadow-sm disabled:opacity-50"
+              >
+                {parsing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+                {parsing ? 'Parsing…' : 'Preview Questions →'}
+              </button>
             </div>
-            <textarea
-              rows={12}
-              placeholder="Paste the Q&amp;A output from ChatGPT / Gemini / Claude here…
+          )}
 
-Example:
-Q1: भारत के प्रथम राष्ट्रपति कौन थे?
-Answer: डॉ. राजेंद्र प्रसाद
-
-Q2: Who founded the Maurya Empire?
-Answer: Chandragupta Maurya"
-              value={qaText}
-              onChange={e => setQaText(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-xs resize-y focus:outline-none focus:border-[#244A73] transition-colors font-mono"
-              dir="auto"
-            />
-            {qaText.trim() && (
-              <p className="text-[10px] text-[#66635D]">
-                {qaText.trim().length.toLocaleString()} chars pasted
+          {/* Step 3b: MCQ paste area */}
+          {pasteFormat === 'mcq' && (
+            <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl p-5 shadow-sm space-y-3">
+              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
+                <ClipboardPaste className="w-4 h-4 text-[#244A73]" />
+                Paste MCQ Questions
+              </h2>
+              <p className="text-xs text-[#66635D]">
+                Paste MCQ output here. Each question must have exactly <strong>4 options (A, B, C, D)</strong> and one correct answer:
               </p>
-            )}
+              <div className="bg-[#F7F3EA] border border-[#D5CDBF] rounded-xl p-3 text-[10px] font-mono text-[#252525] leading-relaxed whitespace-pre">
+{`Q1: Bharat kab azad hua?
+A. 1947
+B. 1978
+C. 1897
+D. 1235
+Ans: A
 
-            {error && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{error}</span>
+Q2: What is the capital of India?
+A. Mumbai
+B. New Delhi
+C. Kolkata
+D. Chennai
+Answer: B
+Explanation: New Delhi is the capital of India.`}
               </div>
-            )}
+              <textarea
+                rows={14}
+                placeholder={"Paste MCQ output from ChatGPT / Gemini / Claude here…\n\nExample:\nQ1: Who is the President of India?\nA. Narendra Modi\nB. Droupadi Murmu\nC. Amit Shah\nD. Rajnath Singh\nAnswer: B"}
+                value={mcqText}
+                onChange={e => { setMcqText(e.target.value); setMcqParsed(null); setMcqSaveResult(null); setMcqError(''); }}
+                className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-xs resize-y focus:outline-none focus:border-[#244A73] transition-colors font-mono"
+                dir="auto"
+              />
+              {mcqText.trim() && (
+                <p className="text-[10px] text-[#66635D]">
+                  {mcqText.trim().length.toLocaleString()} chars pasted
+                </p>
+              )}
 
-            {parseErrors.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] font-bold text-amber-700">Parse errors ({parseErrors.length}):</p>
-                {parseErrors.map((e, i) => (
-                  <div key={i} className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                    <strong>{e.ref}:</strong> {e.issue}
+              {/* MCQ error */}
+              {mcqError && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{mcqError}</span>
+                </div>
+              )}
+
+              {/* MCQ parse preview */}
+              {mcqParsed && (
+                <div className="space-y-3">
+                  {/* Summary bar */}
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-[#F7F3EA] border border-[#E2DACB] rounded-xl p-2.5">
+                      <p className="text-base font-black text-[#244A73]">{mcqParsed.valid.length + mcqParsed.invalid.length}</p>
+                      <p className="text-[10px] text-[#66635D]">Total Detected</p>
+                    </div>
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-2.5">
+                      <p className="text-base font-black text-green-700">{mcqParsed.valid.length}</p>
+                      <p className="text-[10px] text-green-600">Valid</p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+                      <p className="text-base font-black text-amber-700">{mcqParsed.invalid.length}</p>
+                      <p className="text-[10px] text-amber-600">Invalid</p>
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
 
-            <button
-              type="button"
-              onClick={handleParseText}
-              disabled={parsing || !qaText.trim()}
-              className="w-full flex items-center justify-center gap-2 bg-[#244A73] text-white font-bold py-3 rounded-xl hover:bg-[#1a3a5c] transition-colors shadow-sm disabled:opacity-50"
-            >
-              {parsing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
-              {parsing ? 'Parsing…' : 'Preview Questions →'}
-            </button>
-          </div>
+                  {/* Invalid list */}
+                  {mcqParsed.invalid.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-amber-700">Issues found ({mcqParsed.invalid.length} questions will be skipped):</p>
+                      <div className="max-h-36 overflow-y-auto space-y-1">
+                        {mcqParsed.invalid.map((e, i) => (
+                          <div key={i} className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                            <strong>Q{e.questionNumber}:</strong> {e.reason}
+                            {e.text && e.text !== `Q${e.questionNumber}` && (
+                              <span className="block text-[9px] text-amber-600 mt-0.5 truncate">{e.text}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Valid preview list */}
+                  {mcqParsed.valid.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-green-700">{mcqParsed.valid.length} valid question{mcqParsed.valid.length !== 1 ? 's' : ''} ready to save:</p>
+                      <div className="max-h-48 overflow-y-auto space-y-1 bg-[#F7F3EA] border border-[#E2DACB] rounded-xl p-2">
+                        {mcqParsed.valid.map((q, i) => (
+                          <div key={i} className="text-[10px] text-[#252525] flex items-start gap-2 py-1 border-b border-[#E2DACB] last:border-0">
+                            <span className="text-[#244A73] font-bold shrink-0">Q{q.questionNumber}</span>
+                            <span className="flex-1 truncate">{q.questionText}</span>
+                            <span className="shrink-0 font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded text-[9px]">
+                              Ans: {String.fromCharCode(65 + q.correctIndex)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* MCQ save result */}
+              {mcqSaveResult && (
+                <div className="p-3 rounded-xl bg-green-50 border border-green-200 text-green-800 text-xs space-y-1">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" />
+                    {mcqSaveResult.saved} question{mcqSaveResult.saved !== 1 ? 's' : ''} saved to Question Bank!
+                  </p>
+                  <p className="text-[10px] text-green-700">
+                    Total parsed: {mcqSaveResult.totalParsed} • Valid: {mcqSaveResult.valid} • Invalid: {mcqSaveResult.invalid} • Saved: {mcqSaveResult.saved}
+                  </p>
+                  {mcqSaveResult.errors && mcqSaveResult.errors.length > 0 && (
+                    <p className="text-[10px] text-amber-700">{mcqSaveResult.errors.length} question{mcqSaveResult.errors.length !== 1 ? 's' : ''} skipped due to format errors.</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setMcqText(''); setMcqParsed(null); setMcqSaveResult(null); setMcqError(''); }}
+                    className="text-[10px] font-bold text-green-700 underline"
+                  >
+                    Paste more questions
+                  </button>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleMcqPreview}
+                  disabled={!mcqText.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 border border-[#244A73] text-[#244A73] font-bold py-3 rounded-xl hover:bg-[#F7F3EA] transition-colors disabled:opacity-50 text-xs"
+                >
+                  <Eye className="w-4 h-4" />
+                  Preview &amp; Validate
+                </button>
+                <button
+                  type="button"
+                  onClick={handleMcqSave}
+                  disabled={mcqSaving || !mcqText.trim() || !!mcqSaveResult}
+                  className="flex-1 flex items-center justify-center gap-2 bg-[#244A73] text-white font-bold py-3 rounded-xl hover:bg-[#1a3a5c] transition-colors disabled:opacity-50 text-xs"
+                >
+                  {mcqSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {mcqSaving ? 'Saving…' : 'Save to Question Bank'}
+                </button>
+              </div>
+              <p className="text-[10px] text-[#66635D] text-center">
+                MCQ questions are saved directly to the Question Bank and can be used in Practice mode and Multiplayer Battles.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
