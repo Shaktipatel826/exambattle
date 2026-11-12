@@ -11,7 +11,7 @@ import {
   UploadCloud, FileText, X, Loader2, CheckCircle2, XCircle,
   AlertCircle, Eye, Save, Swords, Trash2, Edit3, ChevronDown,
   ChevronUp, Info, Cpu, Zap, Settings2, RefreshCw, Copy,
-  ClipboardPaste, Sparkles, Bot
+  ClipboardPaste, Sparkles, Bot, BookOpen
 } from 'lucide-react';
 
 const SUBJECTS = [
@@ -148,6 +148,12 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
   const [mcqSaving, setMcqSaving] = useState(false);
   const [mcqSaveResult, setMcqSaveResult] = useState(null); // { saved, errors }
   const [mcqError, setMcqError] = useState('');
+  // MCQ → Saved Test state
+  const [mcqSaveAsTestModal, setMcqSaveAsTestModal] = useState(false);
+  const [mcqTestTitle, setMcqTestTitle] = useState('');
+  const [mcqTestSaving, setMcqTestSaving] = useState(false);
+  const [mcqTestSaved, setMcqTestSaved] = useState(null); // { _id, title }
+  const [mcqTestError, setMcqTestError] = useState('');
 
   // ─── Shared Preview/Save/Room State ───────────────────────────────────────
   const [questions, setQuestions] = useState([]);
@@ -185,6 +191,11 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
     setMcqSaving(false);
     setMcqSaveResult(null);
     setMcqError('');
+    setMcqSaveAsTestModal(false);
+    setMcqTestTitle('');
+    setMcqTestSaving(false);
+    setMcqTestSaved(null);
+    setMcqTestError('');
     setExpandedQ(null);
     setEditingQ(null);
     setEditDraft(null);
@@ -399,6 +410,64 @@ export const CreateTestPage = ({ token, user, onNavigate, socket, socketConnecte
       setMcqError(`Network error: ${err.message}`);
     } finally {
       setMcqSaving(false);
+    }
+  };
+
+  // ─── Create Saved Test from bulk-saved MCQ questions ─────────────────────
+  // Uses the client-side parsed questions (mcqParsed.valid) which are already
+  // validated. Maps them to the SavedTest question schema and calls POST /api/saved-tests.
+  // The SavedTest schema already supports options[], correctAnswer (0-indexed int),
+  // questionType: 'mcq' — no backend changes required.
+  const handleCreateSavedTestFromMcq = async () => {
+    if (!mcqParsed || mcqParsed.valid.length === 0) return;
+    setMcqTestSaving(true);
+    setMcqTestError('');
+    const autoTitle = mcqTestTitle.trim() ||
+      `${subject} MCQ Test — ${new Date().toLocaleDateString('en-IN')}`;
+    // Map client-parsed MCQ objects to SavedTest question schema
+    const mappedQuestions = mcqParsed.valid.map(q => ({
+      question: q.questionText,
+      options: q.options,                       // string[4]
+      correctAnswer: q.correctIndex,            // 0-indexed integer
+      questionType: 'mcq',
+      explanation: q.explanation || '',
+      referenceAnswer: '',
+      subject,
+      topic: topic || subject,
+      difficulty: difficulty === 'Mixed' ? 'Medium' : difficulty,
+      language: q.language || 'en',
+    }));
+    try {
+      const res = await fetch('/api/saved-tests', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: autoTitle,
+          subject,
+          topic: topic || subject,
+          difficulty,
+          language,
+          mode: 'quick',
+          questions: mappedQuestions,
+          stats: {},
+          sourceDocumentName: 'Bulk MCQ Paste',
+          extractedChars: 0
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMcqTestSaved({ _id: data.savedTest._id, title: autoTitle });
+        setMcqSaveAsTestModal(false);
+      } else {
+        setMcqTestError(data.message || 'Could not create saved test. Please try again.');
+      }
+    } catch (err) {
+      setMcqTestError(`Network error: ${err.message}`);
+    } finally {
+      setMcqTestSaving(false);
     }
   };
 
@@ -1058,7 +1127,7 @@ Explanation: New Delhi is the capital of India.`}
 
               {/* MCQ save result */}
               {mcqSaveResult && (
-                <div className="p-3 rounded-xl bg-green-50 border border-green-200 text-green-800 text-xs space-y-1">
+                <div className="p-3 rounded-xl bg-green-50 border border-green-200 text-green-800 text-xs space-y-2">
                   <p className="font-bold flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
                     {mcqSaveResult.saved} question{mcqSaveResult.saved !== 1 ? 's' : ''} saved to Question Bank!
@@ -1069,9 +1138,40 @@ Explanation: New Delhi is the capital of India.`}
                   {mcqSaveResult.errors && mcqSaveResult.errors.length > 0 && (
                     <p className="text-[10px] text-amber-700">{mcqSaveResult.errors.length} question{mcqSaveResult.errors.length !== 1 ? 's' : ''} skipped due to format errors.</p>
                   )}
+
+                  {/* Create Saved Test from these questions */}
+                  {mcqParsed && mcqParsed.valid.length > 0 && !mcqTestSaved && (
+                    <button
+                      type="button"
+                      onClick={() => { setMcqTestTitle(''); setMcqTestError(''); setMcqSaveAsTestModal(true); }}
+                      className="w-full flex items-center justify-center gap-2 bg-[#244A73] text-white font-bold py-2.5 rounded-xl hover:bg-[#1a3a5c] transition-colors text-xs mt-1"
+                    >
+                      <Swords className="w-4 h-4" />
+                      Create Saved Test from These Questions
+                    </button>
+                  )}
+
+                  {/* After saved test created */}
+                  {mcqTestSaved && (
+                    <div className="mt-1 p-2.5 rounded-xl bg-[#244A73]/10 border border-[#244A73]/30 space-y-2">
+                      <p className="font-bold text-[#244A73] flex items-center gap-1.5 text-[11px]">
+                        <CheckCircle2 className="w-4 h-4" />
+                        Saved Test created: <span className="truncate">{mcqTestSaved.title}</span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onNavigate?.('SAVED_TESTS')}
+                        className="w-full flex items-center justify-center gap-2 bg-[#244A73] text-white font-bold py-2 rounded-xl hover:bg-[#1a3a5c] transition-colors text-xs"
+                      >
+                        <Swords className="w-3.5 h-3.5" />
+                        Go to Saved Tests → Start Battle
+                      </button>
+                    </div>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => { setMcqText(''); setMcqParsed(null); setMcqSaveResult(null); setMcqError(''); }}
+                    onClick={() => { setMcqText(''); setMcqParsed(null); setMcqSaveResult(null); setMcqError(''); setMcqTestSaved(null); setMcqTestTitle(''); setMcqTestError(''); }}
                     className="text-[10px] font-bold text-green-700 underline"
                   >
                     Paste more questions
@@ -1103,6 +1203,72 @@ Explanation: New Delhi is the capital of India.`}
               <p className="text-[10px] text-[#66635D] text-center">
                 MCQ questions are saved directly to the Question Bank and can be used in Practice mode and Multiplayer Battles.
               </p>
+            </div>
+          )}
+
+          {/* ── Create Saved Test from MCQ Modal ───────────────────────────── */}
+          {mcqSaveAsTestModal && mcqParsed && mcqParsed.valid.length > 0 && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#252525]/50 backdrop-blur-sm p-4">
+              <div className="bg-[#FFFDF8] border border-[#E2DACB] rounded-2xl shadow-2xl w-full max-w-sm space-y-5 p-6">
+
+                {/* Header */}
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="font-black text-[#252525] text-base leading-snug">Create Saved Test</h2>
+                    <p className="text-xs text-[#66635D] mt-0.5">
+                      <span className="font-bold text-[#244A73]">{mcqParsed.valid.length}</span> MCQ questions will be added.
+                    </p>
+                  </div>
+                  <button onClick={() => setMcqSaveAsTestModal(false)} className="p-1.5 rounded-lg hover:bg-[#F7F3EA] text-[#66635D] transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Test title input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-[#66635D]">Test Name (optional)</label>
+                  <input
+                    type="text"
+                    placeholder={`${subject} MCQ Test — ${new Date().toLocaleDateString('en-IN')}`}
+                    value={mcqTestTitle}
+                    onChange={e => setMcqTestTitle(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#F7F3EA] border border-[#D5CDBF] text-[#252525] text-xs focus:outline-none focus:border-[#244A73] transition-colors"
+                  />
+                </div>
+
+                {/* Info row */}
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#244A73]/8 border border-[#244A73]/20 text-xs text-[#244A73]">
+                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                  <span className="font-semibold">Subject:</span> {subject}
+                  {topic && <><span className="text-[#66635D]">•</span><span className="font-semibold">Topic:</span> {topic}</>}
+                </div>
+
+                {/* Error */}
+                {mcqTestError && (
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{mcqTestError}</span>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setMcqSaveAsTestModal(false)}
+                    className="flex-1 py-2.5 rounded-xl border border-[#E2DACB] text-[#66635D] text-xs font-semibold hover:bg-[#F7F3EA] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateSavedTestFromMcq}
+                    disabled={mcqTestSaving}
+                    className="flex-1 py-2.5 rounded-xl bg-[#244A73] text-white text-xs font-bold hover:bg-[#1a3a5c] disabled:opacity-50 flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    {mcqTestSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    {mcqTestSaving ? 'Creating…' : 'Create Test'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
