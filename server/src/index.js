@@ -25,6 +25,7 @@ import studentRoutes from './routes/studentRoutes.js';
 import docToTestRoutes from './routes/docToTestRoutes.js';
 import taxonomyRoutes from './routes/taxonomyRoutes.js';
 import savedTestRoutes from './routes/savedTestRoutes.js';
+import battleResultRoutes from './routes/battleResultRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,6 +66,7 @@ app.use('/api/student', studentRoutes);
 app.use('/api/taxonomy', taxonomyRoutes);
 app.use('/api', taxonomyRoutes);
 app.use('/api/saved-tests', savedTestRoutes);
+app.use('/api/battle-results', battleResultRoutes);
 
 // Health Check
 app.get('/api/health', (req, res) => {

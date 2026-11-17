@@ -1,5 +1,6 @@
 import { Question } from '../models/Question.js';
 import { TestAttempt } from '../models/TestAttempt.js';
+import { BattleResult } from '../models/BattleResult.js';
 import { awardUserXP } from '../services/gamification.js';
 import { scoreShortAnswer } from '../services/proximityScorer.js';
 
@@ -266,13 +267,46 @@ export const initializeBattleSocket = (io) => {
     });
 
     // Join Room
-    socket.on('join_room', ({ roomCode, user }, callback) => {
+    socket.on('join_room', async ({ roomCode, user }, callback) => {
       if (!roomCode) return;
       const cleanCode = roomCode.trim().toUpperCase();
       const room = activeRooms.get(cleanCode);
       console.log(`[Battle] join_room: code=${cleanCode}, userId=${user?.id || user?._id}, socketId=${socket.id}, roomStatus=${room?.status}`);
 
       if (!room) {
+        // ── DURABLE FALLBACK: room not in memory (server restarted) ──────────
+        // Try to recover the result from the BattleResult DB collection.
+        // This handles the core production scenario:
+        //   - Battle finishes at T=0, server saves BattleResult to MongoDB.
+        //   - Render free tier restarts server at T+30s → activeRooms cleared.
+        //   - Player reconnects at T+60s, calls join_room.
+        //   - Old code: { success: false, message: 'Battle Room not found' } → stuck forever.
+        //   - New code: query BattleResult by roomCode, re-emit battle_finished if found.
+        const cleanCodeForFallback = (roomCode || '').trim().toUpperCase();
+        if (cleanCodeForFallback) {
+          try {
+            const savedResult = await BattleResult.findOne({ roomCode: cleanCodeForFallback }).lean();
+            if (savedResult) {
+              const userId = user?.id || user?._id;
+              const isParticipant = savedResult.leaderboard.some(
+                entry => String(entry.userId) === String(userId)
+              );
+              if (isParticipant) {
+                console.log(`[Battle] join_room: room ${cleanCodeForFallback} not in memory — recovered from DB for userId=${userId}`);
+                socket.emit('battle_finished', {
+                  leaderboard: savedResult.leaderboard,
+                  questions:   savedResult.questions,
+                });
+                if (typeof callback === 'function') {
+                  callback({ success: true, alreadyFinished: true, recoveredFromDB: true });
+                }
+                return;
+              }
+            }
+          } catch (dbErr) {
+            console.error(`[Battle] join_room DB fallback error for room ${cleanCodeForFallback}:`, dbErr.message);
+          }
+        }
         console.warn(`[Battle] join_room failed: room ${cleanCode} not found`);
         if (typeof callback === 'function') callback({ success: false, message: 'Battle Room not found. Check room code.' });
         return;
@@ -561,7 +595,7 @@ export const initializeBattleSocket = (io) => {
         return;
       }
 
-      const player = room.players.find(p => p.userId === userId);
+      const player = room.players.find(p => String(p.userId) === String(userId));
       if (!player) {
         console.warn(`[Battle] player_finished: userId=${userId} not found in room ${cleanCode}. Players: [${room.players.map(p => p.userId).join(', ')}]`);
         return;
@@ -794,20 +828,48 @@ async function finishBattle(room, io) {
     console.log(`[Battle]   → ${p.name} (socketId=${p.socketId})`);
   });
 
+  // ── DURABLE PERSISTENCE: Save to BattleResult BEFORE broadcast ───────────
+  // This ensures that even if the server restarts immediately after broadcasting,
+  // the result is recoverable via GET /api/battle-results/:roomCode.
+  // We store the payload on room._finishedPayload first (fast-path for same-session
+  // reconnects), then fire-and-forget the DB save.
+  room._finishedPayload = {
+    leaderboard,
+    questions: room.questions,
+  };
+
+  // Fire-and-forget DB persistence (non-blocking — does NOT delay broadcast)
+  (async () => {
+    try {
+      await Promise.race([
+        BattleResult.findOneAndUpdate(
+          { roomCode: room.roomCode },
+          {
+            $setOnInsert: {
+              roomCode:   room.roomCode,
+              status:     'FINISHED',
+              finishedAt: new Date(),
+              config:     room.config,
+              leaderboard,
+              questions:  room.questions,
+            },
+          },
+          { upsert: true, new: false }
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('BattleResult save timeout')), 8000)),
+      ]);
+      console.log(`[Battle DB] BattleResult persisted for room ${room.roomCode}`);
+    } catch (e) {
+      console.error(`[Battle DB] BattleResult save failed for room ${room.roomCode}: ${e.message}`);
+      // Non-fatal: in-memory _finishedPayload is the fast-path; DB is the durable fallback
+    }
+  })();
+
   // Broadcast results to all players immediately
   io.to(room.roomCode).emit('battle_finished', {
     leaderboard,
     questions: room.questions   // includes referenceAnswer — revealed only after finish
   });
-
-  // ── RECONNECT FIX: cache the finished payload so join_room can re-deliver it ──
-  // If a player's WebSocket dropped at the exact moment of broadcast (common on Render
-  // free tier), they reconnect with a new socket ID and call join_room. We re-send
-  // battle_finished from join_room using this cached payload.
-  room._finishedPayload = {
-    leaderboard,
-    questions: room.questions
-  };
 
   console.log(`[Battle] battle_finished broadcast completed for room ${room.roomCode}: ${room.players.map(p => `${p.name}=${p.score}pts`).join(', ')}`);
 

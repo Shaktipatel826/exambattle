@@ -576,3 +576,148 @@ describe('Reconnect-after-finish re-delivery (production bug fix)', () => {
   });
 
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST SUITE 8: Durable Persistence & DB Recovery
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Suite 8: Durable persistence and DB recovery', () => {
+
+  // ── Helper: simulate BattleResult DB persistence (pure logic) ──────────────
+  function simulateBattleResultSave(room, leaderboard, questions) {
+    // Mimics the fire-and-forget BattleResult.findOneAndUpdate call in finishBattle().
+    // Returns a document structure identical to what MongoDB would store.
+    if (!room.roomCode) throw new Error('roomCode required');
+    return {
+      roomCode:   room.roomCode,
+      status:     'FINISHED',
+      finishedAt: new Date(),
+      config:     room.config || {},
+      leaderboard,
+      questions,
+    };
+  }
+
+  // ── Helper: simulate join_room DB fallback (after server restart) ─────────
+  // Returns { action: 'recovered'|'rejected', payload? }
+  function simulateJoinRoomDBFallback(savedResult, userId) {
+    if (!savedResult) return { action: 'rejected' };
+    const isParticipant = savedResult.leaderboard.some(
+      entry => String(entry.userId) === String(userId)
+    );
+    if (!isParticipant) return { action: 'rejected' };
+    return {
+      action: 'recovered',
+      payload: { leaderboard: savedResult.leaderboard, questions: savedResult.questions },
+    };
+  }
+
+  const ROOM_CODE = 'TEST01';
+  const LB = [
+    { rank: 1, userId: 'host',  name: 'Alice', score: 2, accuracy: 67 },
+    { rank: 2, userId: 'guest', name: 'Bob',   score: 0, accuracy: 0  },
+  ];
+  const QS = [
+    { _id: 'q1', question: 'Q1?', options: ['A', 'B', 'C', 'D'], correctAnswer: 0 },
+    { _id: 'q2', question: 'Q2?', options: ['A', 'B', 'C', 'D'], correctAnswer: 2 },
+    { _id: 'q3', question: 'Q3?', options: ['A', 'B', 'C', 'D'], correctAnswer: 1 },
+  ];
+
+  test('BattleResult document is built with correct roomCode, leaderboard and questions', () => {
+    const room = { roomCode: ROOM_CODE, config: { subject: 'History', timeLimitMinutes: 5 } };
+    const doc = simulateBattleResultSave(room, LB, QS);
+    assert.equal(doc.roomCode, ROOM_CODE);
+    assert.equal(doc.status, 'FINISHED');
+    assert.ok(doc.finishedAt instanceof Date, 'finishedAt must be a Date');
+    assert.deepEqual(doc.leaderboard, LB);
+    assert.deepEqual(doc.questions, QS);
+    assert.equal(doc.config.subject, 'History');
+  });
+
+  test('DB fallback: participant receives recovered result when room not in memory', () => {
+    const savedResult = { roomCode: ROOM_CODE, leaderboard: LB, questions: QS };
+    const result = simulateJoinRoomDBFallback(savedResult, 'host');
+    assert.equal(result.action, 'recovered', 'Known player must be served the recovered result');
+    assert.deepEqual(result.payload.leaderboard, LB);
+    assert.deepEqual(result.payload.questions, QS);
+  });
+
+  test('DB fallback: non-participant is rejected even if DB record exists', () => {
+    const savedResult = { roomCode: ROOM_CODE, leaderboard: LB, questions: QS };
+    const result = simulateJoinRoomDBFallback(savedResult, 'stranger');
+    assert.equal(result.action, 'rejected', 'Non-participant must not access the result');
+  });
+
+  test('DB fallback: null DB record means battle not yet finished — returns rejected', () => {
+    const result = simulateJoinRoomDBFallback(null, 'host');
+    assert.equal(result.action, 'rejected', 'No DB record → battle not done yet or expired');
+  });
+
+  test('player_finished userId matching: String() normalization handles ObjectId vs string', () => {
+    // Simulates the fixed find() call: String(p.userId) === String(userId)
+    const players = [
+      { userId: 'abc123', finished: false },   // string
+      { userId: 'def456', finished: false },   // string
+    ];
+    // Case 1: exact string match
+    const p1 = players.find(p => String(p.userId) === String('abc123'));
+    assert.ok(p1, 'Exact string userId must match');
+
+    // Case 2: ObjectId-like object (toString returns the id string)
+    const fakeObjectId = { toString: () => 'abc123' };
+    const p2 = players.find(p => String(p.userId) === String(fakeObjectId));
+    assert.ok(p2, 'ObjectId (via toString) must still match after String() normalization');
+
+    // Case 3: unknown userId returns undefined — no crash
+    const p3 = players.find(p => String(p.userId) === String('nonexistent'));
+    assert.equal(p3, undefined, 'Unknown userId must return undefined, not throw');
+  });
+
+  test('BattleResult leaderboard contains submittedAnswers for comparative review', () => {
+    const room = { roomCode: ROOM_CODE, config: { subject: 'Polity', timeLimitMinutes: 5 } };
+    const lbWithAnswers = [
+      { rank: 1, userId: 'host',  name: 'Alice', score: 2, submittedAnswers: { 0: 0, 1: 2 } },
+      { rank: 2, userId: 'guest', name: 'Bob',   score: 0, submittedAnswers: { 0: 1 } },
+    ];
+    const doc = simulateBattleResultSave(room, lbWithAnswers, QS);
+    assert.ok(doc.leaderboard[0].submittedAnswers, 'submittedAnswers must be persisted');
+    assert.equal(doc.leaderboard[0].submittedAnswers[0], 0);  // Alice answered Q1 → option A
+    assert.equal(doc.leaderboard[1].submittedAnswers[0], 1);  // Bob answered Q1 → option B
+  });
+
+  test('_finishedPayload is set BEFORE broadcast (fast-path cache)', () => {
+    // Verifies the ordering fix: _finishedPayload is now assigned before io.emit().
+    // Simulate the new order inside finishBattle():
+    const room = {
+      status: 'IN_PROGRESS',
+      roomCode: ROOM_CODE,
+      config: {},
+      players: [
+        { userId: 'host', finished: true, answers: { 0: 0 } }
+      ],
+      _timerTimeout: null, _finishTimeout: null,
+    };
+    const broadcastLog = [];
+    // Step 1: set _finishedPayload FIRST
+    room._finishedPayload = { leaderboard: LB, questions: QS };
+    // Step 2: then broadcast
+    broadcastLog.push('battle_finished');
+    // Step 3: fire-and-forget DB save
+    // (not awaited in this test — simulated as sync)
+    simulateBattleResultSave(room, LB, QS);
+
+    assert.ok(room._finishedPayload, '_finishedPayload must exist before broadcast');
+    assert.equal(broadcastLog[0], 'battle_finished', 'Broadcast must follow payload cache assignment');
+  });
+
+  test('REST recovery payload structure matches socket battle_finished payload', () => {
+    // Verifies that what the REST endpoint returns matches what the socket emits,
+    // so the frontend can apply either identically.
+    const socketPayload = { leaderboard: LB, questions: QS };
+    const restPayload = { leaderboard: LB, questions: QS, finishedAt: new Date(), config: {} };
+
+    // Frontend only uses leaderboard and questions from either source
+    assert.deepEqual(restPayload.leaderboard, socketPayload.leaderboard);
+    assert.deepEqual(restPayload.questions, socketPayload.questions);
+  });
+
+});

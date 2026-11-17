@@ -178,6 +178,10 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
         clearTimeout(newSocket._retryTimeoutId);
         newSocket._retryTimeoutId = null;
       }
+      if (newSocket._pollTimeoutId) {
+        clearTimeout(newSocket._pollTimeoutId);
+        newSocket._pollTimeoutId = null;
+      }
       setSubmitting(false);
       setLeaderboard(leaderboard);
       if (questions) setReviewQuestions(questions);
@@ -418,20 +422,72 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
     }, 15000);
     socket._retryTimeoutId = retryId;
 
-    // Safety net: if battle_finished not received within 65s, show error
+    // ── REST POLL RECOVERY ───────────────────────────────────────────────────
+    // After 30s without battle_finished, start polling GET /api/battle-results/:roomCode
+    // This handles: server restart between finishBattle() and reconnect, or any other
+    // scenario where the socket event was not received.
+    const pollId = setTimeout(async () => {
+      console.log('[Battle] 30s elapsed without battle_finished — starting REST poll recovery');
+      const recovered = await fetchBattleResult(roomCode, token);
+      if (recovered) {
+        console.log('[Battle] REST poll recovery successful — results applied');
+        if (socket._finishTimeoutId) {
+          clearTimeout(socket._finishTimeoutId);
+          socket._finishTimeoutId = null;
+        }
+        if (socket._retryTimeoutId) {
+          clearTimeout(socket._retryTimeoutId);
+          socket._retryTimeoutId = null;
+        }
+      }
+    }, 30000);
+    socket._pollTimeoutId = pollId;
+
+    // Safety net: if battle_finished not received within 65s, show error with retry button
     // 65s > 60s backend force-finish + 5s network overhead
     const timeoutId = setTimeout(() => {
       if (socket._retryTimeoutId) {
         clearTimeout(socket._retryTimeoutId);
         socket._retryTimeoutId = null;
       }
+      if (socket._pollTimeoutId) {
+        clearTimeout(socket._pollTimeoutId);
+        socket._pollTimeoutId = null;
+      }
       setSubmitting(false);
-      setError('Results are taking too long to arrive. Please wait or refresh if results still do not appear.');
+      setError('Results are taking too long to arrive. Use the "Check Results" button below or refresh the page.');
     }, 65000);
 
     // Store timeout ids so we can clear them when battle_finished arrives
     socket._finishTimeoutId = timeoutId;
-  }, [socket, roomState, selectedAnswers, submitting, user]);
+  }, [socket, roomState, selectedAnswers, submitting, user, token]);
+
+  // ── REST Recovery: fetch battle result from durable DB storage ─────────────
+  // Called when battle_finished socket event is not received within 30s.
+  // Returns true if result was successfully applied, false otherwise.
+  const fetchBattleResult = useCallback(async (roomCode, authToken) => {
+    if (!roomCode) return false;
+    try {
+      const apiBase = window.location.origin;
+      const res = await fetch(`${apiBase}/api/battle-results/${roomCode}`, {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.success && data.result) {
+        setLeaderboard(data.result.leaderboard);
+        setReviewQuestions(data.result.questions || []);
+        setRoomState(prev => prev ? { ...prev, status: 'FINISHED' } : prev);
+        setSubmitting(false);
+        setError('');
+        console.log('[Battle] fetchBattleResult: applied result from DB recovery');
+        return true;
+      }
+    } catch (e) {
+      console.warn('[Battle] fetchBattleResult failed:', e.message);
+    }
+    return false;
+  }, []);
 
   const handleRematch = () => {
     setSelectedAnswers({});
@@ -982,6 +1038,7 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
 
   // ── "Waiting for results" overlay ─────────────────────────────────────────
   if (submitting) {
+    const submittingRoomCode = roomState?.roomCode;
     return (
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-4">
         <div className="bg-[#FFFDF8] p-10 rounded-2xl border border-[#E2DACB] shadow-sm text-center space-y-4">
@@ -990,8 +1047,22 @@ export const MultiplayerBattlePage = ({ token, user, initialRoomCode, savedTestM
           <p className="text-sm text-[#66635D]">Waiting for all players to finish…</p>
           <p className="text-xs text-[#66635D]">Results will appear automatically once everyone is done.</p>
           {error && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-xl flex items-center gap-2 justify-center">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+            <div className="space-y-3">
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-xl flex items-center gap-2 justify-center">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+              </div>
+              {submittingRoomCode && (
+                <button
+                  onClick={async () => {
+                    setError('');
+                    const ok = await fetchBattleResult(submittingRoomCode, token);
+                    if (!ok) setError('Results not available yet. If the battle is finished, please refresh the page.');
+                  }}
+                  className="w-full py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider transition-all"
+                >
+                  Check Results
+                </button>
+              )}
             </div>
           )}
         </div>
