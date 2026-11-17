@@ -148,6 +148,7 @@ export function initializeCalculationSocket(io) {
         const difficulty  = config?.difficulty  || 'medium';
         const durationSec = Number(config?.durationSeconds) || 60;
         const validDurations = [60, 120, 180];
+        const mode = config?.mode || 'mixed';
         const duration = validDurations.includes(durationSec) ? durationSec : 60;
 
         const roomCode = genCalcRoomCode();
@@ -158,7 +159,7 @@ export function initializeCalculationSocket(io) {
         const room = {
           roomCode,
           hostId:   user.id || user._id,
-          config: { categories, difficulty, durationSeconds: duration },
+          config: { categories, difficulty, durationSeconds: duration, mode },
           status:   'LOBBY',
           questions,
           players:  [{
@@ -177,6 +178,7 @@ export function initializeCalculationSocket(io) {
           _timerTimeout:  null,
           _finishTimeout: null,
           _finishedPayload: null,
+          _answered: new Set(),
         };
 
         calcRooms.set(roomCode, room);
@@ -265,6 +267,92 @@ export function initializeCalculationSocket(io) {
       }
     });
 
+    // ── UPDATE ROOM SETTINGS (Host only) ─────────────────────────────────────
+    socket.on('calculation_update_settings', async ({ roomCode, userId, config }, callback) => {
+      try {
+        const cleanCode = (roomCode || '').trim().toUpperCase();
+        const room = calcRooms.get(cleanCode);
+        if (!room) return callback?.({ success: false, message: 'Room not found.' });
+
+        if (String(room.hostId) !== String(userId)) {
+          return callback?.({ success: false, message: 'Only the host can change settings.' });
+        }
+
+        if (room.status !== 'LOBBY') {
+          return callback?.({ success: false, message: 'Settings can only be changed in the lobby.' });
+        }
+
+        const validDurations = [60, 120, 180];
+        const validDifficulties = ['easy', 'medium', 'hard', 'expert'];
+
+        if (config?.durationSeconds && validDurations.includes(Number(config.durationSeconds))) {
+          room.config.durationSeconds = Number(config.durationSeconds);
+        }
+        if (config?.difficulty && validDifficulties.includes(config.difficulty)) {
+          room.config.difficulty = config.difficulty;
+        }
+        if (Array.isArray(config?.categories) && config.categories.length > 0) {
+          const valid = config.categories.filter(c => ALL_CATEGORIES.includes(c));
+          if (valid.length > 0) room.config.categories = valid;
+        }
+        if (config?.mode && ['mixed', 'topic'].includes(config.mode)) {
+          room.config.mode = config.mode;
+        }
+
+        const sanitized = sanitizeCalcRoom(room);
+        io.to(cleanCode).emit('calculation_settings_updated', { config: room.config });
+        io.to(cleanCode).emit('calculation_room_updated', sanitized);
+
+        console.log(`[Calc] Settings updated for room ${cleanCode} by host:`, room.config);
+        callback?.({ success: true, config: room.config, room: sanitized });
+      } catch (err) {
+        console.error('[Calc] calculation_update_settings error:', err.message);
+        callback?.({ success: false, message: err.message });
+      }
+    });
+
+    // ── REMATCH / RETURN TO LOBBY ─────────────────────────────────────────────
+    socket.on('calculation_rematch_requested', async ({ roomCode, userId }, callback) => {
+      try {
+        const cleanCode = (roomCode || '').trim().toUpperCase();
+        const room = calcRooms.get(cleanCode);
+        if (!room) return callback?.({ success: false, message: 'Room not found.' });
+
+        const player = room.players.find(p => String(p.userId) === String(userId));
+        if (!player) return callback?.({ success: false, message: 'Player not in room.' });
+
+        // Clear any lingering timers from previous battle
+        if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+        if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
+
+        // Transition back to LOBBY
+        room.status = 'LOBBY';
+        room.startTime = null;
+        room.endTime = null;
+        room._finishedPayload = null;
+        room._answered = new Set();
+
+        // Reset player scores and indices
+        room.players.forEach(p => {
+          p.correct = 0;
+          p.wrong = 0;
+          p.attempted = 0;
+          p.currentQIndex = 0;
+          p.finished = false;
+        });
+
+        const sanitized = sanitizeCalcRoom(room);
+        io.to(cleanCode).emit('calculation_lobby_updated', sanitized);
+        io.to(cleanCode).emit('calculation_room_updated', sanitized);
+
+        console.log(`[Calc] Rematch requested by ${player.name} in room ${cleanCode} — returned to LOBBY`);
+        callback?.({ success: true, room: sanitized });
+      } catch (err) {
+        console.error('[Calc] calculation_rematch_requested error:', err.message);
+        callback?.({ success: false, message: err.message });
+      }
+    });
+
     // ── START BATTLE ─────────────────────────────────────────────────────────
     socket.on('start_calculation_battle', async ({ roomCode, userId }, callback) => {
       try {
@@ -295,6 +383,24 @@ export function initializeCalculationSocket(io) {
           return callback?.({ success: true });
         }
         if (room.status !== 'LOBBY') return callback?.({ success: false, message: 'Invalid state.' });
+
+        // Clear any old timers before starting next battle
+        if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+        if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
+
+        // Generate a FRESH question sequence for this battle/rematch
+        room.questions = generateQuestionBatch(room.config.categories, room.config.difficulty, 200);
+
+        // Reset all player counters and indices
+        room.players.forEach(p => {
+          p.correct = 0;
+          p.wrong = 0;
+          p.attempted = 0;
+          p.currentQIndex = 0;
+          p.finished = false;
+        });
+        room._answered = new Set();
+        room._finishedPayload = null;
 
         const durationMs = room.config.durationSeconds * 1000;
         room.status    = 'IN_PROGRESS';
@@ -463,6 +569,8 @@ export function initializeCalculationSocket(io) {
       if (!room) return;
       room.players = room.players.filter(p => String(p.userId) !== String(userId));
       if (room.players.length === 0) {
+        if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+        if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
         calcRooms.delete(cleanCode);
       } else {
         if (String(room.hostId) === String(userId)) room.hostId = room.players[0].userId;

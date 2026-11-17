@@ -204,12 +204,38 @@ export const CalculationArenaPage = ({ token, user }) => {
 
     s.on('calculation_room_updated', (room) => {
       setRoomState(room);
+      if (room.status === 'LOBBY') {
+        setView(prev => prev === 'RESULT' ? 'LOBBY' : prev);
+      }
+    });
+
+    s.on('calculation_lobby_updated', (room) => {
+      setRoomState(room);
+      setCurrentQ(null);
+      setCurrentQIndex(0);
+      setInputValue('');
+      setFeedback(null);
+      setSubmitting(false);
+      setMyScore({ correct: 0, wrong: 0, attempted: 0 });
+      setOpponentScore({ correct: 0, wrong: 0, attempted: 0 });
+      setView('LOBBY');
+    });
+
+    s.on('calculation_settings_updated', ({ config }) => {
+      setRoomState(prev => prev ? { ...prev, config: { ...prev.config, ...config } } : prev);
     });
 
     s.on('calculation_battle_started', ({ startTime, endTime, config }) => {
       const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
       setTimeLeft(remaining);
       endTimeRef.current = endTime;
+      setCurrentQIndex(0);
+      setInputValue('');
+      setFeedback(null);
+      setSubmitting(false);
+      setResultPayload(null);
+      setMyScore({ correct: 0, wrong: 0, attempted: 0 });
+      setOpponentScore({ correct: 0, wrong: 0, attempted: 0 });
       setView('BATTLE');
     });
 
@@ -244,6 +270,16 @@ export const CalculationArenaPage = ({ token, user }) => {
 
     return () => { clearInterval(timerRef.current); s.disconnect(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep local config in sync with roomState config
+  useEffect(() => {
+    if (roomState?.config) {
+      if (roomState.config.durationSeconds) setDuration(roomState.config.durationSeconds);
+      if (roomState.config.difficulty) setDifficulty(roomState.config.difficulty);
+      if (roomState.config.categories) setSelectedCats(roomState.config.categories);
+      if (roomState.config.mode) setMode(roomState.config.mode);
+    }
+  }, [roomState?.config]);
 
   // ── Server-authoritative countdown ──────────────────────────────────────────
   useEffect(() => {
@@ -324,6 +360,57 @@ export const CalculationArenaPage = ({ token, user }) => {
       userId: myId,
     }, (resp) => {
       if (!resp?.success) setError(resp?.message || 'Could not start battle');
+    });
+  };
+
+  const handleUpdateConfig = (updates) => {
+    if (!socket || !roomState) return;
+    const isHost = roomState?.hostId === myId || String(roomState?.hostId) === String(myId);
+    if (!isHost) return;
+
+    const newConfig = {
+      durationSeconds: updates.durationSeconds ?? (roomState?.config?.durationSeconds || duration),
+      difficulty: updates.difficulty ?? (roomState?.config?.difficulty || difficulty),
+      categories: updates.categories ?? (roomState?.config?.categories || (mode === 'mixed' ? ALL_CAT_IDS : selectedCats)),
+      mode: updates.mode ?? (roomState?.config?.mode || mode),
+    };
+
+    if (updates.durationSeconds !== undefined) setDuration(updates.durationSeconds);
+    if (updates.difficulty !== undefined) setDifficulty(updates.difficulty);
+    if (updates.categories !== undefined) setSelectedCats(updates.categories);
+    if (updates.mode !== undefined) setMode(updates.mode);
+
+    socket.emit('calculation_update_settings', {
+      roomCode: roomState.roomCode,
+      userId: myId,
+      config: newConfig,
+    }, (resp) => {
+      if (!resp?.success) {
+        setError(resp?.message || 'Failed to update settings');
+      }
+    });
+  };
+
+  const handleRematch = () => {
+    if (!socket || !roomState) return;
+    setError('');
+    socket.emit('calculation_rematch_requested', {
+      roomCode: roomState.roomCode,
+      userId: myId,
+    }, (resp) => {
+      if (resp?.success) {
+        setRoomState(resp.room);
+        setCurrentQ(null);
+        setCurrentQIndex(0);
+        setInputValue('');
+        setFeedback(null);
+        setSubmitting(false);
+        setMyScore({ correct: 0, wrong: 0, attempted: 0 });
+        setOpponentScore({ correct: 0, wrong: 0, attempted: 0 });
+        setView('LOBBY');
+      } else {
+        setError(resp?.message || 'Could not request rematch');
+      }
     });
   };
 
@@ -617,17 +704,156 @@ export const CalculationArenaPage = ({ token, user }) => {
             </div>
           </div>
 
-          {/* Config tags */}
-          <div className="flex flex-wrap justify-center gap-2 text-[10px] font-bold">
-            <span className="px-2.5 py-1 rounded-full bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF]">
-              {roomState?.config?.difficulty?.toUpperCase()}
-            </span>
-            <span className="px-2.5 py-1 rounded-full bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF]">
-              {roomState?.config?.durationSeconds}s
-            </span>
-            <span className="px-2.5 py-1 rounded-full bg-[#EFE9DC] text-[#244A73] border border-[#D5CDBF]">
-              {(roomState?.config?.categories || []).length} categories
-            </span>
+          {/* Previous Match Scorecard Banner (if continuous rematch) */}
+          {resultPayload?.leaderboard && (
+            <div className="bg-[#F7F3EA] border border-[#E2DACB] rounded-2xl p-4 text-xs text-left space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-[10px] text-[#66635D] uppercase tracking-wider">Previous Battle Scorecard</span>
+                <span className="font-black text-[11px] text-[#244A73]">
+                  {resultPayload.leaderboard[0]?.result === 'DRAW'
+                    ? "DRAW"
+                    : `${resultPayload.leaderboard[0]?.name} Won`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between font-bold text-xs">
+                {resultPayload.leaderboard.map(e => (
+                  <span key={e.userId} className={String(e.userId) === String(myId) ? 'text-[#244A73]' : 'text-[#252525]'}>
+                    {e.name}: {e.correct} correct ({e.accuracy}%)
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Battle Settings Panel (Host controls, opponent sees live sync) */}
+          <div className="bg-[#F7F3EA] p-4 rounded-2xl border border-[#E2DACB] text-left space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black text-[#252525] uppercase tracking-wider">
+                Battle Settings
+              </h3>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                isHost
+                  ? 'bg-[#EFE9DC] text-[#244A73] border-[#244A73]/30'
+                  : 'bg-[#FFFDF8] text-[#66635D] border-[#D5CDBF]'
+              }`}>
+                {isHost ? '⭐ You Control Settings' : 'Controlled by Host'}
+              </span>
+            </div>
+
+            {/* Duration */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-[#66635D] uppercase tracking-wider">Duration</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {DURATIONS.map(d => {
+                  const active = (roomState?.config?.durationSeconds || duration) === d.sec;
+                  return (
+                    <button
+                      key={d.sec}
+                      type="button"
+                      disabled={!isHost}
+                      onClick={() => handleUpdateConfig({ durationSeconds: d.sec })}
+                      className={`py-2 px-1 rounded-xl border text-xs font-black text-center transition-all ${
+                        active
+                          ? 'bg-[#244A73] border-[#244A73] text-white shadow-sm'
+                          : 'bg-[#FFFDF8] border-[#E2DACB] text-[#252525] hover:border-[#244A73]'
+                      } ${!isHost ? 'cursor-default opacity-85' : 'cursor-pointer active:scale-95'}`}
+                    >
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Difficulty */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-[#66635D] uppercase tracking-wider">Difficulty</span>
+              <div className="grid grid-cols-4 gap-1.5">
+                {DIFFICULTIES.map(d => {
+                  const active = (roomState?.config?.difficulty || difficulty) === d.id;
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      disabled={!isHost}
+                      onClick={() => handleUpdateConfig({ difficulty: d.id })}
+                      className={`py-2 px-1 rounded-xl border text-[11px] font-black text-center transition-all ${
+                        active
+                          ? 'bg-[#244A73] border-[#244A73] text-white shadow-sm'
+                          : 'bg-[#FFFDF8] border-[#E2DACB] text-[#252525] hover:border-[#244A73]'
+                      } ${!isHost ? 'cursor-default opacity-85' : 'cursor-pointer active:scale-95'}`}
+                    >
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Mode */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-[#66635D] uppercase tracking-wider">Challenge Mode</span>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { id: 'mixed', label: 'Mixed Challenge', desc: 'Random topics' },
+                  { id: 'topic', label: 'Topic Challenge', desc: 'Selected topics' },
+                ].map(m => {
+                  const active = (roomState?.config?.mode || mode) === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      disabled={!isHost}
+                      onClick={() => handleUpdateConfig({ mode: m.id })}
+                      className={`p-2 rounded-xl border text-xs text-left transition-all ${
+                        active
+                          ? 'bg-[#244A73] border-[#244A73] text-white shadow-sm'
+                          : 'bg-[#FFFDF8] border-[#E2DACB] text-[#252525] hover:border-[#244A73]'
+                      } ${!isHost ? 'cursor-default opacity-85' : 'cursor-pointer active:scale-95'}`}
+                    >
+                      <div className="font-black text-[11px]">{m.label}</div>
+                      <div className={`text-[9px] ${active ? 'text-white/70' : 'text-[#66635D]'}`}>{m.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Categories if Topic Challenge */}
+            {((roomState?.config?.mode || mode) === 'topic') && (
+              <div className="space-y-2 pt-1 border-t border-[#E2DACB]">
+                <span className="text-[10px] font-bold text-[#66635D] uppercase tracking-wider block">
+                  Select Topics {isHost ? '(Click to Toggle)' : ''}
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {ALL_CAT_IDS.map(catId => {
+                    const currentCats = roomState?.config?.categories || selectedCats;
+                    const active = currentCats.includes(catId);
+                    return (
+                      <button
+                        key={catId}
+                        type="button"
+                        disabled={!isHost}
+                        onClick={() => {
+                          if (!isHost) return;
+                          const next = active
+                            ? currentCats.length > 1 ? currentCats.filter(c => c !== catId) : currentCats
+                            : [...currentCats, catId];
+                          handleUpdateConfig({ categories: next, mode: 'topic' });
+                        }}
+                        className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold transition-all ${
+                          active
+                            ? 'bg-[#244A73] border-[#244A73] text-white'
+                            : 'bg-[#FFFDF8] border-[#E2DACB] text-[#66635D]'
+                        } ${!isHost ? 'cursor-default opacity-80' : 'cursor-pointer active:scale-95'}`}
+                      >
+                        {catId.replace(/_/g, ' ')}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Players */}
@@ -849,16 +1075,16 @@ export const CalculationArenaPage = ({ token, user }) => {
         {/* Action buttons */}
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={resetState}
-            className="py-3 rounded-xl bg-[#244A73] hover:bg-[#1B3857] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+            onClick={handleRematch}
+            className="py-3.5 rounded-xl bg-[#2D6A4F] hover:bg-[#1B4332] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95 cursor-pointer"
           >
-            <RotateCcw className="w-4 h-4" /> New Battle
+            <RotateCcw className="w-4 h-4" /> PLAY AGAIN / REMATCH
           </button>
           <button
             onClick={handleLeaveRoom}
-            className="py-3 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#252525] font-bold text-xs uppercase transition-all"
+            className="py-3.5 rounded-xl bg-[#F7F3EA] border border-[#E2DACB] text-[#252525] hover:bg-[#EFE9DC] font-bold text-xs uppercase transition-all cursor-pointer"
           >
-            Exit
+            Leave Room
           </button>
         </div>
       </div>

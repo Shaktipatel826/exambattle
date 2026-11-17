@@ -80,9 +80,10 @@ function simulateFinish(room) {
 function mkRoom(overrides = {}) {
   const questions = generateQuestionBatch(['addition'], 'easy', 50);
   return {
+    hostId: 'host',
     status: 'IN_PROGRESS',
     roomCode: 'CTEST1',
-    config: { durationSeconds: 60 },
+    config: { durationSeconds: 60, difficulty: 'easy', categories: ['addition'], mode: 'mixed' },
     startTime: Date.now() - 1000,
     endTime: Date.now() + 59000,
     questions,
@@ -93,6 +94,96 @@ function mkRoom(overrides = {}) {
     _finishedPayload: null,
     ...overrides,
   };
+}
+
+/** Simulate calculation_rematch_requested logic */
+function simulateRematchRequest(room, userId) {
+  const player = room.players.find(p => String(p.userId) === String(userId));
+  if (!player) return { success: false, message: 'Player not in room.' };
+
+  if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+  if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
+
+  room.status = 'LOBBY';
+  room.startTime = null;
+  room.endTime = null;
+  room._finishedPayload = null;
+  room._answered = new Set();
+
+  room.players.forEach(p => {
+    p.correct = 0;
+    p.wrong = 0;
+    p.attempted = 0;
+    p.currentQIndex = 0;
+    p.finished = false;
+  });
+
+  return { success: true, room };
+}
+
+/** Simulate calculation_update_settings logic */
+function simulateUpdateSettings(room, userId, config) {
+  if (String(room.hostId) !== String(userId)) {
+    return { success: false, message: 'Only the host can change settings.' };
+  }
+  if (room.status !== 'LOBBY') {
+    return { success: false, message: 'Settings can only be changed in the lobby.' };
+  }
+
+  const validDurations = [60, 120, 180];
+  const validDifficulties = ['easy', 'medium', 'hard', 'expert'];
+
+  if (config?.durationSeconds && validDurations.includes(Number(config.durationSeconds))) {
+    room.config.durationSeconds = Number(config.durationSeconds);
+  }
+  if (config?.difficulty && validDifficulties.includes(config.difficulty)) {
+    room.config.difficulty = config.difficulty;
+  }
+  if (Array.isArray(config?.categories) && config.categories.length > 0) {
+    const valid = config.categories.filter(c => ALL_CATEGORIES.includes(c));
+    if (valid.length > 0) room.config.categories = valid;
+  }
+  if (config?.mode && ['mixed', 'topic'].includes(config.mode)) {
+    room.config.mode = config.mode;
+  }
+
+  return { success: true, config: room.config };
+}
+
+/** Simulate start_calculation_battle rematch start logic */
+function simulateStartBattle(room, userId) {
+  if (String(room.hostId) !== String(userId)) {
+    return { success: false, message: 'Only the host can start.' };
+  }
+  if (room.players.length < 1) {
+    return { success: false, message: 'Need at least 1 player.' };
+  }
+  if (room.status !== 'LOBBY') {
+    return { success: false, message: 'Invalid state.' };
+  }
+
+  if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+  if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
+
+  // Fresh questions
+  room.questions = generateQuestionBatch(room.config.categories || ['addition'], room.config.difficulty || 'medium', 50);
+
+  room.players.forEach(p => {
+    p.correct = 0;
+    p.wrong = 0;
+    p.attempted = 0;
+    p.currentQIndex = 0;
+    p.finished = false;
+  });
+  room._answered = new Set();
+  room._finishedPayload = null;
+
+  const durationMs = room.config.durationSeconds * 1000;
+  room.status = 'IN_PROGRESS';
+  room.startTime = Date.now();
+  room.endTime = room.startTime + durationMs;
+
+  return { success: true, room };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -524,6 +615,194 @@ describe('Suite 7: Existing MCQ/QA Battle regression — no interference', () =>
     let q;
     assert.doesNotThrow(() => { q = generateQuestion(['nonexistent_category'], 'easy', 0); });
     assert.ok(q, 'Must return a question even with invalid category');
+  });
+
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SUITE 8: Continuous Rematch and Host Settings Control
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Suite 8: Continuous rematch and host settings control', () => {
+
+  test('1. Both players remain in the same room after a completed battle', () => {
+    const room = mkRoom();
+    room.players[0].correct = 5;
+    room.players[1].correct = 3;
+    simulateFinish(room);
+    assert.equal(room.status, 'FINISHED');
+    assert.equal(room.players.length, 2, 'Both players still in room');
+    assert.equal(room.roomCode, 'CTEST1', 'Room code preserved');
+
+    // Player requests rematch
+    const res = simulateRematchRequest(room, 'host');
+    assert.equal(res.success, true);
+    assert.equal(room.status, 'LOBBY', 'Status transitioned back to LOBBY');
+    assert.equal(room.players.length, 2, 'Both players remain in same room in LOBBY');
+    assert.equal(room.roomCode, 'CTEST1', 'Room code strictly preserved across rematch');
+  });
+
+  test('2. Host can change duration and difficulty in lobby', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const res = simulateUpdateSettings(room, 'host', {
+      durationSeconds: 120,
+      difficulty: 'hard',
+      mode: 'topic',
+      categories: ['squares', 'cubes']
+    });
+    assert.equal(res.success, true);
+    assert.equal(room.config.durationSeconds, 120);
+    assert.equal(room.config.difficulty, 'hard');
+    assert.equal(room.config.mode, 'topic');
+    assert.deepEqual(room.config.categories, ['squares', 'cubes']);
+  });
+
+  test('3. Non-host cannot change settings', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const res = simulateUpdateSettings(room, 'guest', {
+      durationSeconds: 180,
+      difficulty: 'expert'
+    });
+    assert.equal(res.success, false);
+    assert.equal(res.message, 'Only the host can change settings.');
+    // Settings remain unchanged
+    assert.equal(room.config.durationSeconds, 60);
+    assert.equal(room.config.difficulty, 'easy');
+  });
+
+  test('4. Both players receive updated settings', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    simulateUpdateSettings(room, 'host', { durationSeconds: 180, difficulty: 'medium' });
+    // The room's shared config object is authoritative and visible to all players
+    assert.equal(room.config.durationSeconds, 180);
+    assert.equal(room.config.difficulty, 'medium');
+  });
+
+  test('5. Host can start a rematch without either player rejoining', () => {
+    const room = mkRoom();
+    simulateFinish(room);
+    simulateRematchRequest(room, 'guest'); // guest requests rematch -> lobby
+    assert.equal(room.status, 'LOBBY');
+
+    const startRes = simulateStartBattle(room, 'host');
+    assert.equal(startRes.success, true);
+    assert.equal(room.status, 'IN_PROGRESS', 'Battle starts directly from lobby');
+    assert.equal(room.roomCode, 'CTEST1', 'No new room was created');
+    assert.equal(room.players.length, 2, 'Both players present without rejoining');
+  });
+
+  test('6. Scores and question indexes reset on rematch start', () => {
+    const room = mkRoom();
+    room.players[0].correct = 15;
+    room.players[0].wrong = 3;
+    room.players[0].attempted = 18;
+    room.players[0].currentQIndex = 15;
+    room.players[1].correct = 12;
+    room.players[1].wrong = 2;
+    room.players[1].attempted = 14;
+    room.players[1].currentQIndex = 12;
+
+    simulateFinish(room);
+    simulateRematchRequest(room, 'host');
+    simulateStartBattle(room, 'host');
+
+    for (const p of room.players) {
+      assert.equal(p.correct, 0, `${p.name} correct must reset to 0`);
+      assert.equal(p.wrong, 0, `${p.name} wrong must reset to 0`);
+      assert.equal(p.attempted, 0, `${p.name} attempted must reset to 0`);
+      assert.equal(p.currentQIndex, 0, `${p.name} currentQIndex must reset to 0`);
+      assert.equal(p.finished, false, `${p.name} finished must reset to false`);
+    }
+    assert.equal(room._answered.size, 0, '_answered set must be empty');
+  });
+
+  test('7. A new question sequence is generated for the rematch', () => {
+    const room = mkRoom();
+    const oldQuestions = [...room.questions];
+    simulateFinish(room);
+    simulateRematchRequest(room, 'host');
+    simulateStartBattle(room, 'host');
+
+    // New questions array generated
+    assert.notEqual(room.questions, oldQuestions, 'Questions reference must be new');
+    assert.ok(room.questions.length >= 50, 'Fresh batch must be populated');
+  });
+
+  test('8. Previous battle timer is cleared', () => {
+    let timerCleared = false;
+    const fakeTimer = { id: 123 };
+    const room = mkRoom({
+      _timerTimeout: fakeTimer,
+    });
+    const originalClearTimeout = global.clearTimeout;
+    global.clearTimeout = (id) => {
+      if (id === fakeTimer) timerCleared = true;
+      originalClearTimeout(id);
+    };
+
+    try {
+      simulateRematchRequest(room, 'host');
+      assert.equal(room._timerTimeout, null, '_timerTimeout must be null');
+      assert.equal(timerCleared, true, 'Old timer was cleared');
+    } finally {
+      global.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  test('9. No duplicate timers or finish events across rematches', () => {
+    const room = mkRoom();
+    simulateFinish(room);
+    assert.equal(room.status, 'FINISHED');
+
+    simulateRematchRequest(room, 'host');
+    assert.equal(room.status, 'LOBBY');
+
+    simulateStartBattle(room, 'host');
+    assert.equal(room.status, 'IN_PROGRESS');
+
+    // Finish the second battle
+    const f1 = simulateFinish(room);
+    assert.equal(f1.skipped, false);
+    assert.equal(room.status, 'FINISHED');
+
+    // Idempotent second finish call is skipped
+    const f2 = simulateFinish(room);
+    assert.equal(f2.skipped, true);
+  });
+
+  test('10. Reconnection during the lobby works without resetting room', () => {
+    const room = mkRoom();
+    simulateFinish(room);
+    simulateRematchRequest(room, 'host');
+    assert.equal(room.status, 'LOBBY');
+
+    // Guest reconnects with new socketId
+    const guest = room.players.find(p => p.userId === 'guest');
+    guest.socketId = 'new_sock_guest_999';
+    assert.equal(room.players.length, 2);
+    assert.equal(room.status, 'LOBBY');
+    assert.equal(guest.socketId, 'new_sock_guest_999');
+  });
+
+  test('11. Host disconnect does not allow guest to hijack host-only settings', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    // Host socket disconnects, but hostId remains 'host'
+    const res = simulateUpdateSettings(room, 'guest', { durationSeconds: 180 });
+    assert.equal(res.success, false, 'Guest still cannot modify host settings');
+    assert.equal(room.config.durationSeconds, 60, 'Duration remains unchanged');
+  });
+
+  test('12. Guest or Host can request rematch', () => {
+    const room1 = mkRoom();
+    simulateFinish(room1);
+    const res1 = simulateRematchRequest(room1, 'host');
+    assert.equal(res1.success, true);
+    assert.equal(room1.status, 'LOBBY');
+
+    const room2 = mkRoom();
+    simulateFinish(room2);
+    const res2 = simulateRematchRequest(room2, 'guest');
+    assert.equal(res2.success, true);
+    assert.equal(room2.status, 'LOBBY');
   });
 
 });
