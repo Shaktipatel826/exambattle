@@ -18,6 +18,7 @@ import { AIStudyAssistantModal } from './pages/AIStudyAssistantModal';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { CreateTestPage } from './pages/CreateTestPage';
 import { SavedTestsPage } from './pages/SavedTestsPage';
+import { CalculationArenaPage } from './pages/CalculationArenaPage';
 import { Bot } from 'lucide-react';
 
 const AppContent = () => {
@@ -301,6 +302,10 @@ const AppContent = () => {
             token={token}
             onChallengeFriend={() => setActiveTab('BATTLE')}
           />
+        )}
+
+        {activeTab === 'CALC_ARENA' && (
+          <CalculationArenaPage token={token} user={user} />
         )}
 
         {activeTab === 'WEAK_TOPICS' && (

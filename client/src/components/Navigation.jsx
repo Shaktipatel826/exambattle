@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { 
   Home, Swords, BookOpen, Sparkles, RefreshCw, Trophy, 
-  Users, User, Shield, UploadCloud, Cpu, AlertTriangle, LogOut, X, Mail, Award, Target
+  Users, User, Shield, UploadCloud, Cpu, AlertTriangle, LogOut, X, Mail, Award, Target,
+  Calculator
 } from 'lucide-react';
 
 export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpen: externalProfileOpen, setProfileOpen: externalSetProfileOpen }) => {
@@ -21,14 +22,15 @@ export const Navigation = ({ activeTab, setActiveTab, user, onLogout, profileOpe
   ] : [
     { id: 'HOME', label: 'Home', icon: Home },
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
+    { id: 'CALC_ARENA', label: 'Calc', icon: Calculator, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
-    { id: 'CREATE_TEST', label: 'Create Test', icon: Cpu },
     { id: 'PROFILE', label: 'Profile', icon: User, isProfile: true }
   ];
 
   const desktopStudentItems = [
     { id: 'HOME', label: 'Home', icon: Home },
     { id: 'BATTLE', label: 'Battle', icon: Swords, highlight: true },
+    { id: 'CALC_ARENA', label: 'Calc Arena', icon: Calculator, highlight: true },
     { id: 'PRACTICE', label: 'Practice', icon: BookOpen },
     { id: 'CREATE_TEST', label: 'Create Test', icon: Cpu },
     { id: 'SAVED_TESTS', label: 'Saved Tests', icon: BookOpen },

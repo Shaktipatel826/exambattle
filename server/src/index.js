@@ -10,6 +10,7 @@ import fs from 'fs';
 import { connectDB } from './config/db.js';
 import { seedInitialData } from './seed/demoData.js';
 import { initializeBattleSocket } from './socket/battleSocket.js';
+import { initializeCalculationSocket } from './socket/calculationSocket.js';
 
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
@@ -79,6 +80,7 @@ app.get('/api/health', (req, res) => {
 
 // Initialize Realtime Socket.io Multiplayer Engine
 initializeBattleSocket(io);
+initializeCalculationSocket(io);
 
 // Production Static Frontend Serving
 if (process.env.NODE_ENV === 'production') {
