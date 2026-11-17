@@ -366,21 +366,20 @@ export function initializeCalculationSocket(io) {
           return callback?.({ success: false, message: 'Need at least 1 player.' });
         }
         if (room.status === 'IN_PROGRESS') {
-          // Idempotent: re-broadcast
-          io.to(cleanCode).emit('calculation_battle_started', {
-            startTime: room.startTime,
-            endTime:   room.endTime,
-            config:    room.config,
-          });
-          // Re-send first question to each player's current index
+          // Idempotent: re-broadcast to both room and direct sockets
+          const rebcastPayload = { startTime: room.startTime, endTime: room.endTime, config: room.config };
+          io.to(cleanCode).emit('calculation_battle_started', rebcastPayload);
+          // Re-send directly to each stored socketId as guaranteed fallback
           room.players.forEach(p => {
             const pSocket = io.sockets.sockets.get(p.socketId);
             if (pSocket) {
+              pSocket.join(cleanCode);
+              pSocket.emit('calculation_battle_started', rebcastPayload);
               const q = room.questions[p.currentQIndex];
               if (q) pSocket.emit('calculation_question', { question: sanitizeQuestion(q), qIndex: p.currentQIndex });
             }
           });
-          return callback?.({ success: true });
+          return callback?.({ success: true, startTime: room.startTime, endTime: room.endTime, config: room.config });
         }
         if (room.status !== 'LOBBY') return callback?.({ success: false, message: 'Invalid state.' });
 
@@ -407,19 +406,33 @@ export function initializeCalculationSocket(io) {
         room.startTime = Date.now();
         room.endTime   = room.startTime + durationMs;
 
-        // Broadcast battle_started to all sockets in room
-        io.to(cleanCode).emit('calculation_battle_started', {
+        const battleStartPayload = {
           startTime: room.startTime,
           endTime:   room.endTime,
           config:    room.config,
+        };
+
+        // Broadcast battle_started to all sockets in the Socket.IO room
+        io.to(cleanCode).emit('calculation_battle_started', battleStartPayload);
+
+        // ALSO directly emit to each player's stored socketId as a guaranteed fallback.
+        // This covers the case where a player's socket reconnected and is no longer
+        // a member of the Socket.IO room (io.sockets.sockets membership is lost on reconnect).
+        room.players.forEach(p => {
+          const pSocket = io.sockets.sockets.get(p.socketId);
+          if (pSocket) {
+            pSocket.emit('calculation_battle_started', battleStartPayload);
+            // Ensure this socket is also joined to the room for future events
+            pSocket.join(cleanCode);
+          }
         });
 
         // Send each player their first question
         room.players.forEach(p => {
-          const q = room.questions[0];
           const pSocket = io.sockets.sockets.get(p.socketId);
-          if (pSocket && q) {
-            pSocket.emit('calculation_question', { question: sanitizeQuestion(q), qIndex: 0 });
+          if (pSocket) {
+            const q = room.questions[0];
+            if (q) pSocket.emit('calculation_question', { question: sanitizeQuestion(q), qIndex: 0 });
           }
         });
 
@@ -433,7 +446,7 @@ export function initializeCalculationSocket(io) {
         }, durationMs + 2000); // 2s grace
 
         console.log(`[Calc] Battle started: room=${cleanCode} | players=${room.players.map(p=>p.name).join(' vs ')} | duration=${room.config.durationSeconds}s`);
-        callback?.({ success: true, startTime: room.startTime, endTime: room.endTime });
+        callback?.({ success: true, startTime: room.startTime, endTime: room.endTime, config: room.config });
       } catch (err) {
         console.error('[Calc] start_calculation_battle error:', err.message);
         callback?.({ success: false, message: err.message });

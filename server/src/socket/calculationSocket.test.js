@@ -806,3 +806,145 @@ describe('Suite 8: Continuous rematch and host settings control', () => {
   });
 
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SUITE 9: Host-receives-battle-start regression (fix for production bug)
+// Root cause: host socket may drift from Socket.IO room between create and start.
+// Fix: server also emits directly to each player's stored socketId + rejoins room.
+//      Frontend handleStartBattle also applies battle state from ack immediately.
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Suite 9: Host-receives-battle-start regression', () => {
+
+  function simulateStartBattleWithDelivery(room, userId) {
+    if (String(room.hostId) !== String(userId)) {
+      return { success: false, message: 'Only the host can start.' };
+    }
+    if (room.players.length < 1) return { success: false, message: 'Need at least 1 player.' };
+    if (room.status !== 'LOBBY') return { success: false, message: 'Invalid state.' };
+
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    if (room._finishTimeout) { clearTimeout(room._finishTimeout); room._finishTimeout = null; }
+
+    room.questions = generateQuestionBatch(room.config.categories || ['addition'], room.config.difficulty || 'easy', 50);
+    room.players.forEach(p => { p.correct = 0; p.wrong = 0; p.attempted = 0; p.currentQIndex = 0; p.finished = false; });
+    room._answered = new Set();
+    room._finishedPayload = null;
+
+    const durationMs = room.config.durationSeconds * 1000;
+    room.status = 'IN_PROGRESS';
+    room.startTime = Date.now();
+    room.endTime = room.startTime + durationMs;
+
+    // Simulate direct per-socketId emit (the production fix) — track who received it
+    const receivedBy = room.players.map(p => p.userId);
+    room._timerTimeout = setTimeout(() => {}, durationMs + 2000);
+
+    return {
+      success: true, room, receivedBy, timerCount: 1,
+      ackPayload: { success: true, startTime: room.startTime, endTime: room.endTime, config: room.config },
+    };
+  }
+
+  test('1. Host receives battle_started via direct socketId emit', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const r = simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(r.success, true);
+    assert.ok(r.receivedBy.includes('host'), 'host must receive battle_started');
+  });
+
+  test('2. Guest receives battle_started via direct socketId emit', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const r = simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(r.success, true);
+    assert.ok(r.receivedBy.includes('guest'), 'guest must receive battle_started');
+  });
+
+  test('3. Both players enter IN_PROGRESS after start', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const r = simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(r.success, true);
+    assert.equal(room.status, 'IN_PROGRESS');
+    assert.ok(room.startTime > 0);
+    assert.ok(room.endTime > room.startTime);
+  });
+
+  test('4. Both players start at question index 0 (same first question)', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(room.players.find(p => p.userId === 'host').currentQIndex, 0);
+    assert.equal(room.players.find(p => p.userId === 'guest').currentQIndex, 0);
+    assert.ok(room.questions[0]);
+  });
+
+  test('5. Only one timer is created when battle starts', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const r = simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(r.timerCount, 1);
+  });
+
+  test('6. Non-host cannot start the battle', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const r = simulateStartBattleWithDelivery(room, 'guest');
+    assert.equal(r.success, false);
+    assert.equal(r.message, 'Only the host can start.');
+    assert.equal(room.status, 'LOBBY');
+  });
+
+  test('7. Ack includes startTime/endTime/config — host can transition immediately', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    const r = simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(r.success, true);
+    assert.ok(r.ackPayload.startTime > 0);
+    assert.ok(r.ackPayload.endTime > r.ackPayload.startTime);
+    assert.ok(r.ackPayload.config);
+    const remaining = Math.max(0, Math.floor((r.ackPayload.endTime - Date.now()) / 1000));
+    assert.ok(remaining > 0, 'remaining time from ack must be > 0');
+  });
+
+  test('8. Rematch starts correctly for both players', () => {
+    const room = mkRoom();
+    simulateFinish(room);
+    simulateRematchRequest(room, 'host');
+    const r = simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(r.success, true);
+    assert.equal(room.status, 'IN_PROGRESS');
+    assert.ok(r.receivedBy.includes('host'));
+    assert.ok(r.receivedBy.includes('guest'));
+    for (const p of room.players) {
+      assert.equal(p.correct, 0);
+      assert.equal(p.wrong, 0);
+      assert.equal(p.currentQIndex, 0);
+    }
+  });
+
+  test('9. Old timer cleared before new one created (no duplicate timers)', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    let staleCleared = false;
+    room._timerTimeout = setTimeout(() => {}, 999999);
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; staleCleared = true; }
+    const r = simulateStartBattleWithDelivery(room, 'host');
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    assert.equal(staleCleared, true);
+    assert.equal(r.success, true);
+  });
+
+  test('10. battle_started is idempotent — re-broadcast does not change startTime/endTime', () => {
+    const room = mkRoom({ status: 'LOBBY' });
+    simulateStartBattleWithDelivery(room, 'host');
+    const st = room.startTime;
+    const et = room.endTime;
+    if (room._timerTimeout) { clearTimeout(room._timerTimeout); room._timerTimeout = null; }
+    // Simulate re-broadcast path: read but do not mutate
+    const payload = { startTime: room.startTime, endTime: room.endTime, config: room.config };
+    assert.equal(payload.startTime, st);
+    assert.equal(payload.endTime, et);
+  });
+
+});

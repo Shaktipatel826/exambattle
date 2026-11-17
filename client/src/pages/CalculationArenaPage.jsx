@@ -359,7 +359,26 @@ export const CalculationArenaPage = ({ token, user }) => {
       roomCode: roomState.roomCode,
       userId: myId,
     }, (resp) => {
-      if (!resp?.success) setError(resp?.message || 'Could not start battle');
+      if (resp?.success) {
+        // Apply battle state immediately from the ack.
+        // The socket event 'calculation_battle_started' will also arrive and is idempotent,
+        // but we cannot rely on it alone — the host's socket may have drifted from the
+        // Socket.IO room between create and start (transport upgrade, brief reconnect).
+        const endTime = resp.endTime;
+        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        endTimeRef.current = endTime;
+        setTimeLeft(remaining);
+        setCurrentQIndex(0);
+        setInputValue('');
+        setFeedback(null);
+        setSubmitting(false);
+        setResultPayload(null);
+        setMyScore({ correct: 0, wrong: 0, attempted: 0 });
+        setOpponentScore({ correct: 0, wrong: 0, attempted: 0 });
+        setView('BATTLE');
+      } else {
+        setError(resp?.message || 'Could not start battle');
+      }
     });
   };
 
